@@ -121,6 +121,64 @@ function getClientHints(req) {
 }
 
 /**
+ * Top 50 eSIM-compatible devices (fallback when database is unavailable)
+ * Format: { deviceName: { euicc: true/false, manufacturer: string } }
+ */
+const TOP_ESIM_DEVICES = {
+  'iPhone 12': { euicc: true, manufacturer: 'Apple' },
+  'iPhone 13': { euicc: true, manufacturer: 'Apple' },
+  'iPhone 14': { euicc: true, manufacturer: 'Apple' },
+  'iPhone 15': { euicc: true, manufacturer: 'Apple' },
+  'iPhone 16': { euicc: true, manufacturer: 'Apple' },
+  'iPhone XS': { euicc: true, manufacturer: 'Apple' },
+  'iPhone XR': { euicc: true, manufacturer: 'Apple' },
+  'iPhone 11': { euicc: true, manufacturer: 'Apple' },
+  'Motorola Edge 50': { euicc: true, manufacturer: 'Motorola' },
+  'Moto G84': { euicc: true, manufacturer: 'Motorola' },
+  'Google Pixel 7': { euicc: true, manufacturer: 'Google' },
+  'Google Pixel 7a': { euicc: true, manufacturer: 'Google' },
+  'Google Pixel 8': { euicc: true, manufacturer: 'Google' },
+  'Samsung Galaxy S23': { euicc: true, manufacturer: 'Samsung' },
+  'Samsung Galaxy S24': { euicc: true, manufacturer: 'Samsung' },
+  'Samsung Galaxy S25': { euicc: true, manufacturer: 'Samsung' },
+  'OnePlus 11': { euicc: true, manufacturer: 'OnePlus' },
+  'OnePlus 12': { euicc: true, manufacturer: 'OnePlus' }
+};
+
+/**
+ * Fallback GSMA search using hardcoded list (when database unavailable)
+ */
+function searchGSMADeviceFallback(searchTerm) {
+  if (!searchTerm) return null;
+  
+  const normalized = searchTerm.toLowerCase().trim();
+  
+  // Try exact match first
+  for (const [deviceName, data] of Object.entries(TOP_ESIM_DEVICES)) {
+    if (normalized === deviceName.toLowerCase()) {
+      return {
+        standardised_full_name: deviceName,
+        standardised_manufacturer: data.manufacturer,
+        euicc: data.euicc ? 'true' : 'false'
+      };
+    }
+  }
+  
+  // Try partial match
+  for (const [deviceName, data] of Object.entries(TOP_ESIM_DEVICES)) {
+    if (normalized.includes(deviceName.toLowerCase()) || deviceName.toLowerCase().includes(normalized)) {
+      return {
+        standardised_full_name: deviceName,
+        standardised_manufacturer: data.manufacturer,
+        euicc: data.euicc ? 'true' : 'false'
+      };
+    }
+  }
+  
+  return null;
+}
+
+/**
  * Try to refine iPhone model detection using GPU/performance hints
  * @param {string} gpuRenderer - GPU renderer string
  * @param {number} hardwareConcurrency - CPU cores
@@ -137,6 +195,78 @@ function refineiPhoneModel(gpuRenderer, hardwareConcurrency, possibleModels) {
   // For now, we cannot reliably distinguish iPhone 12/13/14 via GPU alone
   
   return null; // Cannot distinguish, return null to use series name
+}
+
+/**
+ * Android GPU & Resolution Fingerprinting Table
+ * Maps GPU renderer + screen width to device series
+ * @param {string} gpuRenderer - GPU renderer string
+ * @param {number} screenWidth - Screen width in pixels
+ * @param {number} screenHeight - Screen height in pixels
+ * @returns {Object|null} Object with displayName and models array, or null
+ */
+function identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight) {
+  if (!gpuRenderer || !screenWidth) {
+    return null;
+  }
+  
+  // Normalize GPU renderer string (case-insensitive, remove extra spaces)
+  const normalizedGPU = gpuRenderer.trim().toLowerCase();
+  
+  // Android GPU fingerprinting table
+  const androidFingerprints = [
+    // Motorola Edge 50 / Moto G Series
+    {
+      gpu: 'adreno (tm) 710',
+      width: 432,
+      height: 984,
+      displayName: 'Motorola Edge 50 / Moto G84 Series',
+      models: ['Motorola Edge 50', 'Moto G84', 'Moto G84 5G']
+    },
+    // Google Pixel 7 / 7a Series
+    {
+      gpu: 'mali-g710',
+      width: 412,
+      height: 915,
+      displayName: 'Google Pixel 7 / 7a Series',
+      models: ['Google Pixel 7', 'Google Pixel 7a', 'Google Pixel 7 Pro']
+    },
+    // Samsung Galaxy S23 / S24 Series (Snapdragon)
+    {
+      gpu: 'adreno (tm) 740',
+      width: 360,
+      height: 780,
+      displayName: 'Samsung Galaxy S23 / S24 Series',
+      models: ['Samsung Galaxy S23', 'Samsung Galaxy S24', 'Samsung Galaxy S23 Ultra']
+    },
+    // OnePlus 11 / 12 Series
+    {
+      gpu: 'adreno (tm) 740',
+      width: 412,
+      height: 915,
+      displayName: 'OnePlus 11 / 12 Series',
+      models: ['OnePlus 11', 'OnePlus 12', 'OnePlus 11 Pro']
+    }
+  ];
+  
+  // Try to find match (allow ±2px tolerance for screen dimensions)
+  for (const fingerprint of androidFingerprints) {
+    if (normalizedGPU.includes(fingerprint.gpu.toLowerCase())) {
+      const widthMatch = Math.abs(screenWidth - fingerprint.width) <= 2;
+      const heightMatch = !fingerprint.height || Math.abs(screenHeight - fingerprint.height) <= 2;
+      
+      if (widthMatch && heightMatch) {
+        console.log(`🤖 Android fingerprint match: ${fingerprint.displayName} (GPU: ${gpuRenderer}, Screen: ${screenWidth}x${screenHeight})`);
+        return {
+          displayName: fingerprint.displayName,
+          models: fingerprint.models,
+          isUnique: fingerprint.models.length === 1
+        };
+      }
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -372,11 +502,22 @@ app.get('/', (req, res) => {
 });
 
 /**
+ * Generate a truly unique scan ID
+ */
+function generateUniqueScanId() {
+  // High-precision timestamp + random string for uniqueness
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 11); // 9 random chars
+  return `scan-${timestamp}-${random}`;
+}
+
+/**
  * Generate QR code route
  */
 app.get('/generate', async (req, res) => {
   try {
-    const scanId = req.query.id || `scan-${Date.now()}`;
+    // Always generate a new unique scanId (ignore query param to prevent collisions)
+    const scanId = generateUniqueScanId();
     const url = `${BASE_URL}/s/${scanId}`;
     
     // Generate QR code as data URL (larger size for better scanning)
@@ -488,11 +629,49 @@ app.post('/log/:id', (req, res) => {
     const pixelRatio = clientData.pixelRatio;
     const gpuRenderer = clientData.gpuRenderer;
     
-    // iPhone Fingerprinting: If device is Apple/iPhone, use resolution-based identification
+    // Priority 1: Client Hints (if available from client-side)
+    const clientHintsModel = clientData.clientHintsData?.model;
+    const clientHintsBrand = clientData.clientHintsData?.brand;
+    
+    // Priority 2: Android GPU Fingerprinting (if brand/model is null/masked)
+    let androidFingerprint = null;
+    if ((!deviceBrand || !deviceModel || deviceModel === 'K') && gpuRenderer && screenWidth) {
+      console.log(`🤖 Device brand/model masked or null, attempting Android GPU fingerprinting...`);
+      androidFingerprint = identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight);
+      
+      if (androidFingerprint) {
+        deducedModel = androidFingerprint.displayName;
+        console.log(`✅ Android fingerprinting result: ${deducedModel}`);
+        
+        // Try to find GSMA match for each possible model
+        let foundMatch = false;
+        for (const model of androidFingerprint.models) {
+          console.log(`[Matching] Input: ${model}`);
+          const result = searchGSMADevice(model);
+          
+          if (result) {
+            gsmaData = result;
+            foundMatch = true;
+            console.log(`[Matching] Result: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
+            break; // Use first match found
+          }
+        }
+        
+        if (foundMatch) {
+          matchConfidence = androidFingerprint.isUnique ? 100 : 50;
+          console.log(`✅ GSMA match found with confidence: ${matchConfidence}%`);
+        } else {
+          console.log(`❌ No GSMA match found for Android fingerprint`);
+          matchConfidence = 50; // Medium confidence for fingerprint match without GSMA
+        }
+      }
+    }
+    
+    // Priority 3: iPhone Fingerprinting: If device is Apple/iPhone, use resolution-based identification
     let iphoneFingerprint = null;
     let gsmaMatches = []; // Declare outside block for later use in eSIM determination
-    if (deviceBrand && deviceBrand.toLowerCase().includes('apple') || 
-        deviceModel && deviceModel.toLowerCase().includes('iphone')) {
+    if (!androidFingerprint && (deviceBrand && deviceBrand.toLowerCase().includes('apple') || 
+        deviceModel && deviceModel.toLowerCase().includes('iphone'))) {
       console.log(`🍎 Detected Apple device, attempting iPhone fingerprinting...`);
       iphoneFingerprint = identifyiPhoneModel(screenWidth, screenHeight, pixelRatio, gpuRenderer, clientData.hardwareConcurrency);
       
@@ -508,7 +687,13 @@ app.post('/log/:id', (req, res) => {
         
         for (const model of iphoneFingerprint.models) {
           console.log(`[Matching] Input: ${model}`);
-          const result = searchGSMADevice(model);
+          let result = searchGSMADevice(model);
+          
+          // Fallback to hardcoded list if database unavailable
+          if (!result) {
+            console.log(`⚠️  Database search failed, trying fallback list...`);
+            result = searchGSMADeviceFallback(model);
+          }
           
           if (result) {
             gsmaMatches.push(result);
@@ -553,9 +738,39 @@ app.post('/log/:id', (req, res) => {
       }
     }
     
-    // Step A: Parse User-Agent to get primary brand/model hint
-    // Step B: Use advanced matching with screen resolution and GPU (if not iPhone)
-    if (!gsmaData && (deviceBrand || deviceModel)) {
+    // Step A: Use Client Hints if available (highest priority, bypasses masked User-Agent)
+    if (!gsmaData && !androidFingerprint && !iphoneFingerprint && clientHintsModel) {
+      console.log(`🔍 Attempting GSMA match with Client Hints model: ${clientHintsModel}`);
+      const searchTerm = clientHintsBrand ? `${clientHintsBrand} ${clientHintsModel}` : clientHintsModel;
+      gsmaData = searchGSMADevice(searchTerm);
+      
+      // Fallback to hardcoded list if database unavailable
+      if (!gsmaData) {
+        console.log(`⚠️  Database search failed, trying fallback list...`);
+        gsmaData = searchGSMADeviceFallback(searchTerm);
+      }
+      
+      if (gsmaData) {
+        deducedModel = gsmaData.standardised_full_name;
+        matchConfidence = 90; // High confidence for Client Hints
+        console.log(`✅ Client Hints match found: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
+      } else {
+        // Try with just the model name
+        gsmaData = searchGSMADevice(clientHintsModel);
+        if (!gsmaData) {
+          gsmaData = searchGSMADeviceFallback(clientHintsModel);
+        }
+        if (gsmaData) {
+          deducedModel = gsmaData.standardised_full_name;
+          matchConfidence = 85;
+          console.log(`✅ Client Hints match found (model only): ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
+        }
+      }
+    }
+    
+    // Step B: Parse User-Agent to get primary brand/model hint
+    // Step C: Use advanced matching with screen resolution and GPU (if not iPhone/Android fingerprint)
+    if (!gsmaData && !androidFingerprint && !iphoneFingerprint && (deviceBrand || deviceModel)) {
       console.log(`🔎 Attempting advanced matching with brand/model...`);
       gsmaData = advancedDeviceMatch({
         brand: deviceBrand,

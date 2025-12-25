@@ -79,12 +79,48 @@
   }
   
   /**
+   * Get Client Hints data (high-entropy values)
+   * This often bypasses masked User-Agents
+   */
+  async function getClientHintsData() {
+    try {
+      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        const hints = await navigator.userAgentData.getHighEntropyValues([
+          'model',
+          'platformVersion',
+          'architecture',
+          'brands'
+        ]);
+        
+        // Extract brand from brands array
+        let brand = null;
+        if (hints.brands && hints.brands.length > 0) {
+          brand = hints.brands[0].brand || null;
+        }
+        
+        return {
+          model: hints.model || null,
+          brand: brand,
+          platformVersion: hints.platformVersion || null,
+          architecture: hints.architecture || null,
+          brands: hints.brands || null
+        };
+      }
+      return null;
+    } catch (error) {
+      console.warn('Client Hints API not available or failed:', error);
+      return null;
+    }
+  }
+
+  /**
    * Collect all device data
    */
   async function collectDeviceData() {
     const screenInfo = getScreenInfo();
     const gpuInfo = getGPUInfo();
     const batteryInfo = await getBatteryInfo();
+    const clientHintsData = await getClientHintsData();
     
     return {
       serverData: serverData,
@@ -95,6 +131,8 @@
       gpuVendor: gpuInfo?.vendor || null,
       batteryLevel: batteryInfo?.level || null,
       batteryCharging: batteryInfo?.charging || false,
+      hardwareConcurrency: navigator.hardwareConcurrency || null,
+      clientHintsData: clientHintsData, // High-entropy Client Hints
       redirectUrl: DEFAULT_REDIRECT_URL
     };
   }
