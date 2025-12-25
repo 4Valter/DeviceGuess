@@ -1,9 +1,10 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const QRCode = require('qrcode');
 const DeviceDetector = require('device-detector-js');
-const { initDatabase: initGSMADatabase, searchDevice: searchGSMADevice, advancedDeviceMatch } = require('./utils/gsmaDatabase');
+const { initDatabase: initGSMADatabase, searchDevice: searchGSMADevice, advancedDeviceMatch, DB_PATH: GSMA_DB_PATH } = require('./utils/gsmaDatabase');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,6 +37,43 @@ const deviceDetector = new DeviceDetector();
 
 // Initialize GSMA database at startup
 console.log('🔍 Initializing GSMA database...');
+
+// Check if database exists, if not and in production, try to import
+if (!fs.existsSync(GSMA_DB_PATH)) {
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('⚠️  GSMA database not found in production mode');
+    console.warn('⚠️  Attempting automatic import...');
+    
+    // Try to run import (non-blocking, async)
+    const importProcess = spawn('node', [path.join(__dirname, 'scripts', 'importGSMA.js')], {
+      stdio: 'inherit',
+      cwd: __dirname
+    });
+    
+    importProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('✅ Automatic GSMA import completed successfully');
+        // Re-initialize database after import
+        initGSMADatabase();
+      } else {
+        console.error('❌ Automatic GSMA import failed');
+        console.error('⚠️  Please run manually: npm run import-gsma');
+        console.error('⚠️  Device matching will not work until database is imported');
+      }
+    });
+    
+    importProcess.on('error', (error) => {
+      console.error('❌ Error running automatic import:', error.message);
+      console.error('⚠️  Please run manually: npm run import-gsma');
+      console.error('⚠️  Device matching will not work until database is imported');
+    });
+  } else {
+    console.warn(`⚠️  GSMA database file not found at: ${GSMA_DB_PATH}`);
+    console.warn(`⚠️  Please run: npm run import-gsma to import the CSV data`);
+    console.warn(`⚠️  Device matching will not work until database is imported`);
+  }
+}
+
 const gsmaInitResult = initGSMADatabase();
 if (gsmaInitResult) {
   const { getStats } = require('./utils/gsmaDatabase');
@@ -43,6 +81,7 @@ if (gsmaInitResult) {
   console.log(`✅ GSMA Database ready: ${stats.totalDevices} devices loaded`);
 } else {
   console.warn('⚠️  GSMA Database initialization failed - matching may not work');
+  console.warn('⚠️  The app will continue to run, but device matching will return null');
 }
 
 /**

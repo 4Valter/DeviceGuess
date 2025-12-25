@@ -78,8 +78,13 @@ function initDatabase() {
  * @returns {Object|null} Device information or null if not found
  */
 function searchDevice(searchTerm) {
+  // Ensure database is initialized
   if (!db) {
-    initDatabase();
+    const initResult = initDatabase();
+    if (!initResult || !db) {
+      // Database not available, return null gracefully
+      return null;
+    }
   }
   
   if (!searchTerm || searchTerm.trim() === '') {
@@ -140,8 +145,13 @@ function searchDevice(searchTerm) {
  * @returns {Object|null} Best matching device or null
  */
 function advancedDeviceMatch(params) {
+  // Ensure database is initialized
   if (!db) {
-    initDatabase();
+    const initResult = initDatabase();
+    if (!initResult || !db) {
+      // Database not available, return null gracefully
+      return null;
+    }
   }
   
   const { brand, model, screenWidth, screenHeight, gpuRenderer } = params;
@@ -190,8 +200,13 @@ function advancedDeviceMatch(params) {
  * @returns {Array} Array of device information
  */
 function searchDevices(searchTerm, limit = 10) {
+  // Ensure database is initialized
   if (!db) {
-    initDatabase();
+    const initResult = initDatabase();
+    if (!initResult || !db) {
+      // Database not available, return empty array gracefully
+      return [];
+    }
   }
   
   if (!searchTerm || searchTerm.trim() === '') {
@@ -217,8 +232,13 @@ function searchDevices(searchTerm, limit = 10) {
  * Get database statistics
  */
 function getStats() {
+  // Ensure database is initialized
   if (!db) {
-    initDatabase();
+    const initResult = initDatabase();
+    if (!initResult || !db) {
+      // Database not available, return zero stats
+      return { totalDevices: 0, databasePath: DB_PATH };
+    }
   }
   
   try {
