@@ -1,0 +1,27 @@
+{
+  "name": "deviceguess",
+  "version": "1.0.0",
+  "description": "Device Intelligence tracking solution - QR code scanner that collects device metadata",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "generate-qr": "node scripts/generateQR.js"
+  },
+  "keywords": [
+    "device-tracking",
+    "qr-code",
+    "device-intelligence"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "device-detector-js": "^3.0.3",
+    "ejs": "^3.1.10",
+    "express": "^4.22.1",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

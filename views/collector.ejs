@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .loader {
+            text-align: center;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="loader">
+        <div class="spinner"></div>
+        <h1>Loading...</h1>
+        <p>Preparing your experience</p>
+    </div>
+    
+    <script>
+        (function() {
+            'use strict';
+            
+            // Server data passed from EJS
+            const serverData = <%- JSON.stringify(serverData) %>;
+            const scanId = '<%= scanId %>';
+            const redirectUrl = '<%= redirectUrl %>';
+            
+            /**
+             * Get GPU information via WebGL
+             */
+            function getGPUInfo() {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                    
+                    if (!gl) {
+                        return null;
+                    }
+                    
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        return {
+                            vendor: gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || null,
+                            renderer: gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || null
+                        };
+                    }
+                    
+                    // Fallback: try to get renderer from standard parameters
+                    return {
+                        vendor: gl.getParameter(gl.VENDOR) || null,
+                        renderer: gl.getParameter(gl.RENDERER) || null
+                    };
+                } catch (error) {
+                    console.error('Error getting GPU info:', error);
+                    return null;
+                }
+            }
+            
+            /**
+             * Get battery information (if supported)
+             */
+            async function getBatteryInfo() {
+                try {
+                    if ('getBattery' in navigator) {
+                        const battery = await navigator.getBattery();
+                        return {
+                            level: Math.round(battery.level * 100) / 100,
+                            charging: battery.charging
+                        };
+                    }
+                    return null;
+                } catch (error) {
+                    console.error('Error getting battery info:', error);
+                    return null;
+                }
+            }
+            
+            /**
+             * Get screen information
+             */
+            function getScreenInfo() {
+                return {
+                    width: window.screen.width || null,
+                    height: window.screen.height || null,
+                    pixelRatio: window.devicePixelRatio || 1,
+                    availWidth: window.screen.availWidth || null,
+                    availHeight: window.screen.availHeight || null,
+                    colorDepth: window.screen.colorDepth || null
+                };
+            }
+            
+            /**
+             * Collect all device data
+             */
+            async function collectDeviceData() {
+                const screenInfo = getScreenInfo();
+                const gpuInfo = getGPUInfo();
+                const batteryInfo = await getBatteryInfo();
+                
+                return {
+                    serverData: serverData,
+                    screenWidth: screenInfo.width,
+                    screenHeight: screenInfo.height,
+                    pixelRatio: screenInfo.pixelRatio,
+                    gpuRenderer: gpuInfo?.renderer || null,
+                    gpuVendor: gpuInfo?.vendor || null,
+                    batteryLevel: batteryInfo?.level !== undefined ? batteryInfo.level : null,
+                    batteryCharging: batteryInfo?.charging !== undefined ? batteryInfo.charging : null,
+                    redirectUrl: redirectUrl
+                };
+            }
+            
+            /**
+             * Send data to server and redirect
+             */
+            async function sendDataAndRedirect() {
+                try {
+                    // Collect device data
+                    const deviceData = await collectDeviceData();
+                    
+                    // Send to server
+                    const response = await fetch(`/log/${scanId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(deviceData)
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Redirect to the specified URL
+                        window.location.href = result.redirectUrl || redirectUrl;
+                    } else {
+                        // Fallback redirect on error
+                        console.error('Failed to log device data:', result.error);
+                        window.location.href = redirectUrl;
+                    }
+                } catch (error) {
+                    console.error('Error sending device data:', error);
+                    // Fallback redirect on error
+                    window.location.href = redirectUrl;
+                }
+            }
+            
+            // Start collection when DOM is ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', sendDataAndRedirect);
+            } else {
+                // DOM is already ready
+                sendDataAndRedirect();
+            }
+        })();
+    </script>
+</body>
+</html>
+
