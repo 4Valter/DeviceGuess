@@ -5,3 +5,4 @@ data/
 .env
 .DS_Store
 public/qr-code.png
+gsma.db

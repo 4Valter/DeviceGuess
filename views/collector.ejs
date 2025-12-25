@@ -126,20 +126,39 @@
             }
             
             /**
+             * Get hardware concurrency (CPU cores)
+             */
+            function getHardwareConcurrency() {
+                try {
+                    return navigator.hardwareConcurrency || null;
+                } catch (error) {
+                    return null;
+                }
+            }
+            
+            /**
              * Collect all device data
              */
             async function collectDeviceData() {
                 const screenInfo = getScreenInfo();
                 const gpuInfo = getGPUInfo();
                 const batteryInfo = await getBatteryInfo();
+                const hardwareConcurrency = getHardwareConcurrency();
                 
                 return {
                     serverData: serverData,
+                    // Full User-Agent string
+                    fullUserAgent: navigator.userAgent || null,
+                    // Screen information
                     screenWidth: screenInfo.width,
                     screenHeight: screenInfo.height,
                     pixelRatio: screenInfo.pixelRatio,
+                    // GPU information
                     gpuRenderer: gpuInfo?.renderer || null,
                     gpuVendor: gpuInfo?.vendor || null,
+                    // Hardware information
+                    hardwareConcurrency: hardwareConcurrency,
+                    // Battery information
                     batteryLevel: batteryInfo?.level !== undefined ? batteryInfo.level : null,
                     batteryCharging: batteryInfo?.charging !== undefined ? batteryInfo.charging : null,
                     redirectUrl: redirectUrl
@@ -147,7 +166,7 @@
             }
             
             /**
-             * Send data to server and redirect
+             * Send data to server and redirect to results page
              */
             async function sendDataAndRedirect() {
                 try {
@@ -166,17 +185,17 @@
                     const result = await response.json();
                     
                     if (result.success) {
-                        // Redirect to the specified URL
-                        window.location.href = result.redirectUrl || redirectUrl;
+                        // Always redirect to results page (never external URL)
+                        window.location.href = `/result/${scanId}`;
                     } else {
-                        // Fallback redirect on error
+                        // Even on error, redirect to results page
                         console.error('Failed to log device data:', result.error);
-                        window.location.href = redirectUrl;
+                        window.location.href = `/result/${scanId}`;
                     }
                 } catch (error) {
                     console.error('Error sending device data:', error);
-                    // Fallback redirect on error
-                    window.location.href = redirectUrl;
+                    // Even on error, redirect to results page
+                    window.location.href = `/result/${scanId}`;
                 }
             }
             

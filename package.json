@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "generate-qr": "node scripts/generateQR.js"
+    "generate-qr": "node scripts/generateQR.js",
+    "import-gsma": "node scripts/importGSMA.js"
   },
   "keywords": [
     "device-tracking",
@@ -16,6 +17,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "better-sqlite3": "^9.2.2",
     "device-detector-js": "^3.0.3",
     "ejs": "^3.1.10",
     "express": "^4.22.1",

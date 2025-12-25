@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const DeviceDetector = require('device-detector-js');
+const { initDatabase: initGSMADatabase, searchDevice: searchGSMADevice, advancedDeviceMatch } = require('./utils/gsmaDatabase');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,6 +33,17 @@ if (!fs.existsSync(SCANS_FILE)) {
 
 // Device detector instance
 const deviceDetector = new DeviceDetector();
+
+// Initialize GSMA database at startup
+console.log('🔍 Initializing GSMA database...');
+const gsmaInitResult = initGSMADatabase();
+if (gsmaInitResult) {
+  const { getStats } = require('./utils/gsmaDatabase');
+  const stats = getStats();
+  console.log(`✅ GSMA Database ready: ${stats.totalDevices} devices loaded`);
+} else {
+  console.warn('⚠️  GSMA Database initialization failed - matching may not work');
+}
 
 /**
  * Get client IP address from request
@@ -94,6 +106,13 @@ function writeScans(scans) {
     return false;
   }
 }
+
+/**
+ * Home route
+ */
+app.get('/', (req, res) => {
+  res.render('home');
+});
 
 /**
  * Generate QR code route
@@ -176,6 +195,85 @@ app.post('/log/:id', (req, res) => {
   const clientData = req.body;
   
   try {
+    console.log(`\n🔍 Starting device matching for scan ID: ${id}`);
+    console.log(`📱 Device Brand: ${clientData.serverData?.deviceBrand || 'N/A'}`);
+    console.log(`📱 Device Model: ${clientData.serverData?.deviceModel || 'N/A'}`);
+    console.log(`📺 Screen: ${clientData.screenWidth || 'N/A'}x${clientData.screenHeight || 'N/A'}`);
+    console.log(`🎮 GPU: ${clientData.gpuRenderer ? clientData.gpuRenderer.substring(0, 50) : 'N/A'}`);
+    
+    // Advanced device matching using multiple data points
+    let gsmaData = null;
+    let matchConfidence = 0;
+    const deviceModel = clientData.serverData?.deviceModel;
+    const deviceBrand = clientData.serverData?.deviceBrand;
+    const screenWidth = clientData.screenWidth;
+    const screenHeight = clientData.screenHeight;
+    const gpuRenderer = clientData.gpuRenderer;
+    
+    // Step A: Parse User-Agent to get primary brand/model hint
+    // Step B: Use advanced matching with screen resolution and GPU
+    if (deviceBrand || deviceModel) {
+      console.log(`🔎 Attempting advanced matching with brand/model...`);
+      gsmaData = advancedDeviceMatch({
+        brand: deviceBrand,
+        model: deviceModel,
+        screenWidth: screenWidth,
+        screenHeight: screenHeight,
+        gpuRenderer: gpuRenderer
+      });
+      
+      if (gsmaData) {
+        matchConfidence = 85; // High confidence for advanced match
+        console.log(`✅ Advanced match found: ${gsmaData.standardised_full_name}`);
+      } else {
+        console.log(`❌ Advanced matching failed, trying simple search...`);
+      }
+    }
+    
+    // Step C: Fallback to simple search if advanced matching didn't work
+    if (!gsmaData) {
+      let searchTerm = null;
+      if (deviceBrand && deviceModel) {
+        searchTerm = `${deviceBrand} ${deviceModel}`.trim();
+      } else if (deviceModel) {
+        searchTerm = deviceModel;
+      } else if (deviceBrand) {
+        searchTerm = deviceBrand;
+      }
+      
+      if (searchTerm) {
+        console.log(`🔎 Searching for: "${searchTerm}"`);
+        gsmaData = searchGSMADevice(searchTerm);
+        
+        if (gsmaData) {
+          matchConfidence = 70; // Medium confidence for simple match
+          console.log(`✅ Simple match found: ${gsmaData.standardised_full_name}`);
+        } else {
+          console.log(`❌ No match found for: "${searchTerm}"`);
+          
+          // If not found, try with just the model name
+          if (deviceModel) {
+            console.log(`🔎 Trying with model only: "${deviceModel}"`);
+            gsmaData = searchGSMADevice(deviceModel);
+            if (gsmaData) {
+              matchConfidence = 50; // Lower confidence for model-only match
+              console.log(`✅ Model-only match found: ${gsmaData.standardised_full_name}`);
+            } else {
+              console.log(`❌ No match found for model: "${deviceModel}"`);
+            }
+          }
+        }
+      } else {
+        console.log(`⚠️  No search term available (brand: ${deviceBrand}, model: ${deviceModel})`);
+      }
+    }
+    
+    if (!gsmaData) {
+      console.log(`❌ No GSMA match found for this device`);
+    } else {
+      console.log(`📊 eUICC (eSIM) status: ${gsmaData.euicc}`);
+    }
+    
     // Merge server and client data
     const scanData = {
       scanId: id,
@@ -192,14 +290,30 @@ app.post('/log/:id', (req, res) => {
       deviceType: clientData.serverData?.deviceType || null,
       clientHints: clientData.serverData?.clientHints || null,
       // Client-side data
+      fullUserAgent: clientData.fullUserAgent || null,
       screenWidth: clientData.screenWidth || null,
       screenHeight: clientData.screenHeight || null,
       pixelRatio: clientData.pixelRatio || null,
       gpuRenderer: clientData.gpuRenderer || null,
       gpuVendor: clientData.gpuVendor || null,
+      hardwareConcurrency: clientData.hardwareConcurrency || null,
       batteryLevel: clientData.batteryLevel !== undefined ? clientData.batteryLevel : null,
       batteryCharging: clientData.batteryCharging !== undefined ? clientData.batteryCharging : null,
-      redirectUrl: clientData.redirectUrl || DEFAULT_REDIRECT_URL
+      redirectUrl: clientData.redirectUrl || DEFAULT_REDIRECT_URL,
+      // GSMA database enrichment
+      gsmaData: gsmaData ? {
+        standardisedFullName: gsmaData.standardised_full_name,
+        standardisedManufacturer: gsmaData.standardised_manufacturer,
+        deviceType: gsmaData.device_type,
+        operatingSystem: gsmaData.operating_system,
+        bands: gsmaData.bands,
+        lte: gsmaData.lte,
+        g5: gsmaData.g5,
+        simslot: gsmaData.simslot,
+        euicc: gsmaData.euicc // eSIM compatibility (true/false string)
+      } : null,
+      // Matching confidence score
+      matchConfidence: matchConfidence
     };
     
     // Read existing scans
@@ -231,16 +345,58 @@ app.post('/log/:id', (req, res) => {
  * Health check endpoint
  */
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.status(200).send('OK');
 });
 
 /**
- * View scans endpoint (optional, for debugging)
+ * Result page for a specific scan
+ */
+app.get('/result/:id', (req, res) => {
+  const { id } = req.params;
+  const scans = readScans();
+  
+  // Find the scan by ID
+  const scan = scans.find(s => s.scanId === id);
+  
+  if (!scan) {
+    return res.status(404).send(`
+      <html>
+        <head><title>Scan Not Found</title></head>
+        <body style="font-family: sans-serif; padding: 40px; text-align: center;">
+          <h1>Scan Not Found</h1>
+          <p>The scan ID "${id}" was not found.</p>
+          <a href="/">Return to home</a>
+        </body>
+      </html>
+    `);
+  }
+  
+  // Determine eSIM compatibility
+  const eSIMCompatible = scan.gsmaData?.euicc === 'true' || scan.gsmaData?.euicc === true;
+  
+  res.render('result', {
+    scan: scan,
+    eSIMCompatible: eSIMCompatible,
+    baseUrl: BASE_URL
+  });
+});
+
+/**
+ * View scans endpoint - HTML view with interesting fields
  */
 app.get('/scans', (req, res) => {
   const scans = readScans();
-  res.json({
-    count: scans.length,
+  
+  // If JSON format requested
+  if (req.query.format === 'json') {
+    return res.json({
+      count: scans.length,
+      scans: scans
+    });
+  }
+  
+  // Render HTML view with interesting fields highlighted
+  res.render('scans', {
     scans: scans
   });
 });

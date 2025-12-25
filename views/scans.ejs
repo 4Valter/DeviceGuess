@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scans Collectés - Device Intelligence</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .header .stats {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .scans-container {
+            display: grid;
+            gap: 20px;
+        }
+        
+        .scans-table {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .confidence-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .confidence-high {
+            background: #48bb78;
+            color: white;
+        }
+        
+        .confidence-medium {
+            background: #ed8936;
+            color: white;
+        }
+        
+        .confidence-low {
+            background: #f56565;
+            color: white;
+        }
+        
+        .confidence-none {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .esim-yes {
+            color: #48bb78;
+            font-weight: 700;
+        }
+        
+        .esim-no {
+            color: #f56565;
+            font-weight: 700;
+        }
+        
+        .esim-unknown {
+            color: #999;
+            font-style: italic;
+        }
+        
+        .scan-card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .scan-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .scan-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .scan-id {
+            font-size: 18px;
+            font-weight: 700;
+            color: #333;
+        }
+        
+        .scan-timestamp {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .scan-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .field-group {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        
+        .field-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 5px;
+            letter-spacing: 0.5px;
+        }
+        
+        .field-value {
+            font-size: 16px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .field-value.null {
+            color: #999;
+            font-style: italic;
+        }
+        
+        .device-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: #e0e0e0;
+            color: #333;
+        }
+        
+        .badge.os {
+            background: #667eea;
+            color: white;
+        }
+        
+        .badge.browser {
+            background: #764ba2;
+            color: white;
+        }
+        
+        .badge.device {
+            background: #48bb78;
+            color: white;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .empty-state h2 {
+            color: #666;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        
+        .empty-state p {
+            color: #999;
+            font-size: 16px;
+        }
+        
+        @media (max-width: 768px) {
+            .scan-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .scan-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-link">← Retour à l'accueil</a>
+    
+    <div class="header">
+        <h1>📊 Scans Collectés</h1>
+        <div class="stats">
+            Total: <strong><%= scans.length %></strong> scan(s) enregistré(s)
+        </div>
+    </div>
+    
+    <% if (scans.length === 0) { %>
+        <div class="empty-state">
+            <h2>📭 Aucun scan pour le moment</h2>
+            <p>Générez un QR code et scannez-le pour commencer à collecter des données</p>
+        </div>
+    <% } else { %>
+        <!-- Table View -->
+        <div class="scans-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Detected Model</th>
+                        <th>eSIM Compatibility</th>
+                        <th>Confidence Score</th>
+                        <th>OS / Browser</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% scans.reverse().forEach((scan, index) => { 
+                        const detectedModel = scan.gsmaData?.standardisedFullName || 
+                                             (scan.deviceBrand && scan.deviceModel ? `${scan.deviceBrand} ${scan.deviceModel}`.trim() : 'Not detected');
+                        const eSIMStatus = scan.gsmaData?.euicc;
+                        const eSIMCompatible = eSIMStatus === 'true' || eSIMStatus === true;
+                        const confidence = scan.matchConfidence || 0;
+                        let confidenceClass = 'confidence-none';
+                        let confidenceText = 'N/A';
+                        if (confidence >= 80) {
+                            confidenceClass = 'confidence-high';
+                            confidenceText = 'High (' + confidence + '%)';
+                        } else if (confidence >= 60) {
+                            confidenceClass = 'confidence-medium';
+                            confidenceText = 'Medium (' + confidence + '%)';
+                        } else if (confidence > 0) {
+                            confidenceClass = 'confidence-low';
+                            confidenceText = 'Low (' + confidence + '%)';
+                        }
+                    %>
+                        <tr>
+                            <td>
+                                <%= new Date(scan.timestamp).toLocaleString('fr-FR', { 
+                                    dateStyle: 'short', 
+                                    timeStyle: 'short' 
+                                }) %>
+                            </td>
+                            <td>
+                                <strong><%= detectedModel %></strong>
+                                <% if (scan.gsmaData?.standardisedManufacturer) { %>
+                                    <br><small style="color: #666;"><%= scan.gsmaData.standardisedManufacturer %></small>
+                                <% } %>
+                            </td>
+                            <td>
+                                <% if (eSIMStatus !== null && eSIMStatus !== undefined) { %>
+                                    <span class="<%= eSIMCompatible ? 'esim-yes' : 'esim-no' %>">
+                                        <%= eSIMCompatible ? '✅ YES' : '❌ NO' %>
+                                    </span>
+                                <% } else { %>
+                                    <span class="esim-unknown">❓ UNKNOWN</span>
+                                <% } %>
+                            </td>
+                            <td>
+                                <span class="confidence-badge <%= confidenceClass %>">
+                                    <%= confidenceText %>
+                                </span>
+                            </td>
+                            <td>
+                                <% if (scan.os) { %>
+                                    <%= scan.os %> <%= scan.osVersion || '' %>
+                                    <br><small style="color: #666;"><%= scan.browser || '' %> <%= scan.browserVersion || '' %></small>
+                                <% } else { %>
+                                    <span class="null">N/A</span>
+                                <% } %>
+                            </td>
+                            <td>
+                                <a href="/result/<%= scan.scanId %>" style="color: #667eea; text-decoration: none; font-weight: 600;">View Details →</a>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Detailed Card View (Collapsible) -->
+        <details style="margin-top: 30px;">
+            <summary style="cursor: pointer; padding: 15px; background: white; border-radius: 10px; font-weight: 600; color: #667eea;">
+                📋 Voir les détails complets (cartes)
+            </summary>
+            <div class="scans-container" style="margin-top: 20px;">
+                <% scans.forEach((scan, index) => { %>
+                <div class="scan-card">
+                    <div class="scan-header">
+                        <div class="scan-id">Scan #<%= scans.length - index %>: <%= scan.scanId %></div>
+                        <div class="scan-timestamp">
+                            <%= new Date(scan.timestamp).toLocaleString('fr-FR', { 
+                                dateStyle: 'short', 
+                                timeStyle: 'short' 
+                            }) %>
+                        </div>
+                    </div>
+                    
+                    <div class="scan-grid">
+                        <!-- Device Information -->
+                        <div class="field-group">
+                            <div class="field-label">🖥️ Système d'exploitation</div>
+                            <div class="field-value">
+                                <% if (scan.os) { %>
+                                    <span class="badge os"><%= scan.os %></span>
+                                    <% if (scan.osVersion) { %> <%= scan.osVersion %><% } %>
+                                <% } else { %>
+                                    <span class="null">Non détecté</span>
+                                <% } %>
+                            </div>
+                        </div>
+                        
+                        <div class="field-group">
+                            <div class="field-label">🌐 Navigateur</div>
+                            <div class="field-value">
+                                <% if (scan.browser) { %>
+                                    <span class="badge browser"><%= scan.browser %></span>
+                                    <% if (scan.browserVersion) { %> <%= scan.browserVersion %><% } %>
+                                <% } else { %>
+                                    <span class="null">Non détecté</span>
+                                <% } %>
+                            </div>
+                        </div>
+                        
+                        <div class="field-group">
+                            <div class="field-label">📱 Appareil</div>
+                            <div class="field-value">
+                                <% if (scan.deviceBrand || scan.deviceModel) { %>
+                                    <span class="badge device">
+                                        <%= scan.deviceBrand || 'Unknown' %> 
+                                        <%= scan.deviceModel || '' %>
+                                    </span>
+                                    <% if (scan.deviceType) { %> (<%= scan.deviceType %>)<% } %>
+                                <% } else { %>
+                                    <span class="null">Non détecté</span>
+                                <% } %>
+                            </div>
+                        </div>
+                        
+                        <!-- Screen Information -->
+                        <div class="field-group">
+                            <div class="field-label">📺 Résolution d'écran</div>
+                            <div class="field-value">
+                                <% if (scan.screenWidth && scan.screenHeight) { %>
+                                    <%= scan.screenWidth %> × <%= scan.screenHeight %>
+                                    <% if (scan.pixelRatio) { %> (Ratio: <%= scan.pixelRatio %>)<% } %>
+                                <% } else { %>
+                                    <span class="null">Non disponible</span>
+                                <% } %>
+                            </div>
+                        </div>
+                        
+                        <!-- GPU Information -->
+                        <div class="field-group">
+                            <div class="field-label">🎮 GPU / Renderer</div>
+                            <div class="field-value">
+                                <% if (scan.gpuRenderer) { %>
+                                    <%= scan.gpuRenderer.substring(0, 50) %><%= scan.gpuRenderer.length > 50 ? '...' : '' %>
+                                <% } else { %>
+                                    <span class="null">Non disponible</span>
+                                <% } %>
+                            </div>
+                        </div>
+                        
+                        <!-- Battery Information -->
+                        <div class="field-group">
+                            <div class="field-label">🔋 Batterie</div>
+                            <div class="field-value">
+                                <% if (scan.batteryLevel !== null) { %>
+                                    <%= (scan.batteryLevel * 100).toFixed(0) %>% 
+                                    <% if (scan.batteryCharging) { %> (En charge) <% } else { %> (Non chargé) <% } %>
+                                <% } else { %>
+                                    <span class="null">Non disponible</span>
+                                <% } %>
+                            </div>
+                        </div>
+                        
+                        <!-- Network Information -->
+                        <div class="field-group">
+                            <div class="field-label">🌍 Adresse IP</div>
+                            <div class="field-value">
+                                <%= scan.ip || '<span class="null">Non disponible</span>' %>
+                            </div>
+                        </div>
+                        
+                        <div class="field-group">
+                            <div class="field-label">🔗 URL de redirection</div>
+                            <div class="field-value" style="font-size: 14px; word-break: break-all;">
+                                <%= scan.redirectUrl || '<span class="null">Non disponible</span>' %>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- GSMA Database Enrichment -->
+                    <% if (scan.gsmaData) { %>
+                        <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #f0f0f0;">
+                            <h3 style="font-size: 16px; color: #667eea; margin-bottom: 15px;">📚 Données GSMA (Base de données enrichie)</h3>
+                            <div class="scan-grid">
+                                <div class="field-group">
+                                    <div class="field-label">📱 Nom standardisé</div>
+                                    <div class="field-value">
+                                        <span class="badge device"><%= scan.gsmaData.standardisedFullName %></span>
+                                    </div>
+                                </div>
+                                
+                                <div class="field-group">
+                                    <div class="field-label">🏭 Fabricant standardisé</div>
+                                    <div class="field-value">
+                                        <%= scan.gsmaData.standardisedManufacturer || '<span class="null">Non disponible</span>' %>
+                                    </div>
+                                </div>
+                                
+                                <div class="field-group">
+                                    <div class="field-label">📱 Type d'appareil</div>
+                                    <div class="field-value">
+                                        <%= scan.gsmaData.deviceType || '<span class="null">Non disponible</span>' %>
+                                    </div>
+                                </div>
+                                
+                                <div class="field-group">
+                                    <div class="field-label">💻 Système d'exploitation</div>
+                                    <div class="field-value">
+                                        <%= scan.gsmaData.operatingSystem || '<span class="null">Non disponible</span>' %>
+                                    </div>
+                                </div>
+                                
+                                <% if (scan.gsmaData.lte || scan.gsmaData.g5) { %>
+                                    <div class="field-group">
+                                        <div class="field-label">📶 Connectivité</div>
+                                        <div class="field-value">
+                                            <% if (scan.gsmaData.lte === 'true') { %>
+                                                <span class="badge" style="background: #48bb78; color: white;">LTE</span>
+                                            <% } %>
+                                            <% if (scan.gsmaData.g5 === 'true') { %>
+                                                <span class="badge" style="background: #667eea; color: white;">5G</span>
+                                            <% } %>
+                                        </div>
+                                    </div>
+                                <% } %>
+                                
+                                <% if (scan.gsmaData.bands) { %>
+                                    <div class="field-group">
+                                        <div class="field-label">📡 Bandes</div>
+                                        <div class="field-value" style="font-size: 14px;">
+                                            <%= scan.gsmaData.bands.substring(0, 50) %><%= scan.gsmaData.bands.length > 50 ? '...' : '' %>
+                                        </div>
+                                    </div>
+                                <% } %>
+                                
+                                <% if (scan.gsmaData.simslot) { %>
+                                    <div class="field-group">
+                                        <div class="field-label">📲 SIM Slot</div>
+                                        <div class="field-value">
+                                            <%= scan.gsmaData.simslot %>
+                                        </div>
+                                    </div>
+                                <% } %>
+                                
+                                <% if (scan.gsmaData.euicc !== null && scan.gsmaData.euicc !== undefined) { %>
+                                    <div class="field-group">
+                                        <div class="field-label">📱 eSIM (eUICC)</div>
+                                        <div class="field-value">
+                                            <% if (scan.gsmaData.euicc === 'true' || scan.gsmaData.euicc === true) { %>
+                                                <span class="badge" style="background: #48bb78; color: white;">✅ Compatible</span>
+                                            <% } else { %>
+                                                <span class="badge" style="background: #f56565; color: white;">❌ Non compatible</span>
+                                            <% } %>
+                                        </div>
+                                    </div>
+                                <% } %>
+                            </div>
+                        </div>
+                    <% } %>
+                </div>
+            <% }); %>
+            </div>
+        </details>
+    <% } %>
+</body>
+</html>
+

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Diagnosis - Results</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            font-size: 32px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .device-name {
+            text-align: center;
+            font-size: 24px;
+            color: #667eea;
+            font-weight: 700;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .esim-status {
+            text-align: center;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 30px 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        
+        .esim-status.yes {
+            background: #48bb78;
+            color: white;
+        }
+        
+        .esim-status.no {
+            background: #f56565;
+            color: white;
+        }
+        
+        .esim-status.unknown {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .info-section {
+            margin-top: 30px;
+        }
+        
+        .info-section h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .info-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        
+        .info-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .info-value {
+            font-size: 16px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .debug-toggle {
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .debug-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .debug-button:hover {
+            background: #5568d3;
+        }
+        
+        .debug-info {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .debug-info.show {
+            display: block;
+        }
+        
+        .debug-info pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+        
+        .back-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        @media (max-width: 600px) {
+            .card {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .device-name {
+                font-size: 18px;
+            }
+            
+            .esim-status {
+                font-size: 20px;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← Retour à l'accueil</a>
+        
+        <div class="card">
+            <h1>🔍 Device Diagnosis</h1>
+            
+            <div class="device-name">
+                <% if (scan.gsmaData && scan.gsmaData.standardisedFullName) { %>
+                    <%= scan.gsmaData.standardisedFullName %>
+                <% } else if (scan.deviceBrand || scan.deviceModel) { %>
+                    <%= scan.deviceBrand || 'Unknown' %> <%= scan.deviceModel || '' %>
+                <% } else { %>
+                    Device détecté
+                <% } %>
+            </div>
+            
+            <div class="esim-status <%= eSIMCompatible ? 'yes' : (scan.gsmaData ? 'no' : 'unknown') %>">
+                <% if (scan.gsmaData) { %>
+                    eSIM Support: <%= eSIMCompatible ? '✅ YES' : '❌ NO' %>
+                <% } else { %>
+                    eSIM Support: ❓ UNKNOWN
+                <% } %>
+            </div>
+            
+            <div class="info-section">
+                <h2>📱 Device Information</h2>
+                <div class="info-grid">
+                    <% if (scan.gsmaData && scan.gsmaData.standardisedManufacturer) { %>
+                        <div class="info-item">
+                            <div class="info-label">Fabricant</div>
+                            <div class="info-value"><%= scan.gsmaData.standardisedManufacturer %></div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.gsmaData && scan.gsmaData.deviceType) { %>
+                        <div class="info-item">
+                            <div class="info-label">Type d'appareil</div>
+                            <div class="info-value"><%= scan.gsmaData.deviceType %></div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.os) { %>
+                        <div class="info-item">
+                            <div class="info-label">Système d'exploitation</div>
+                            <div class="info-value"><%= scan.os %> <%= scan.osVersion || '' %></div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.browser) { %>
+                        <div class="info-item">
+                            <div class="info-label">Navigateur</div>
+                            <div class="info-value"><%= scan.browser %> <%= scan.browserVersion || '' %></div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.screenWidth && scan.screenHeight) { %>
+                        <div class="info-item">
+                            <div class="info-label">Résolution d'écran</div>
+                            <div class="info-value"><%= scan.screenWidth %> × <%= scan.screenHeight %></div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.pixelRatio) { %>
+                        <div class="info-item">
+                            <div class="info-label">Pixel Ratio</div>
+                            <div class="info-value"><%= scan.pixelRatio %></div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.hardwareConcurrency) { %>
+                        <div class="info-item">
+                            <div class="info-label">CPU Cores</div>
+                            <div class="info-value"><%= scan.hardwareConcurrency %></div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.gsmaData && scan.gsmaData.lte === 'true') { %>
+                        <div class="info-item">
+                            <div class="info-label">Connectivité</div>
+                            <div class="info-value">LTE</div>
+                        </div>
+                    <% } %>
+                    
+                    <% if (scan.gsmaData && scan.gsmaData.g5 === 'true') { %>
+                        <div class="info-item">
+                            <div class="info-label">Connectivité</div>
+                            <div class="info-value">5G</div>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+            
+            <div class="debug-toggle">
+                <button class="debug-button" onclick="toggleDebug()">🔧 Afficher les informations de debug</button>
+                <div class="debug-info" id="debugInfo">
+                    <pre><%= JSON.stringify(scan, null, 2) %></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function toggleDebug() {
+            const debugInfo = document.getElementById('debugInfo');
+            const button = document.querySelector('.debug-button');
+            
+            if (debugInfo.classList.contains('show')) {
+                debugInfo.classList.remove('show');
+                button.textContent = '🔧 Afficher les informations de debug';
+            } else {
+                debugInfo.classList.add('show');
+                button.textContent = '🔧 Masquer les informations de debug';
+            }
+        }
+    </script>
+</body>
+</html>
+
