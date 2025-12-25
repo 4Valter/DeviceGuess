@@ -179,6 +179,44 @@ function searchGSMADeviceFallback(searchTerm) {
 }
 
 /**
+ * Hardcoded Signature Map for device identification
+ * Maps hardware signatures (GPU + Resolution) to device models
+ */
+const DEVICE_SIGNATURE_MAP = {
+  // Motorola Edge 50 Signature
+  'adreno_710_432': {
+    gpu: 'adreno (tm) 710',
+    screenWidth: 432,
+    deducedModel: 'Motorola Edge 50',
+    searchTerms: ['Motorola Edge 50', 'Motorola Moto G84', 'Moto Edge 50'],
+    confidence: 85
+  }
+};
+
+/**
+ * Check if device matches a hardcoded signature
+ * @param {string} gpuRenderer - GPU renderer string
+ * @param {number} screenWidth - Screen width in pixels
+ * @returns {Object|null} Signature match or null
+ */
+function checkDeviceSignature(gpuRenderer, screenWidth) {
+  if (!gpuRenderer || !screenWidth) {
+    return null;
+  }
+  
+  const normalizedGPU = gpuRenderer.trim().toLowerCase();
+  
+  // Check Motorola Edge 50 signature
+  if (normalizedGPU.includes('adreno (tm) 710') && screenWidth === 432) {
+    const signature = DEVICE_SIGNATURE_MAP['adreno_710_432'];
+    console.log(`🔍 Hardcoded signature match: ${signature.deducedModel} (GPU: ${gpuRenderer}, Width: ${screenWidth})`);
+    return signature;
+  }
+  
+  return null;
+}
+
+/**
  * Try to refine iPhone model detection using GPU/performance hints
  * @param {string} gpuRenderer - GPU renderer string
  * @param {number} hardwareConcurrency - CPU cores
@@ -649,6 +687,7 @@ app.post('/log/:id', (req, res) => {
     let matchConfidence = 0;
     let deducedModel = null;
     let eSIMFallback = null;
+    let finalESIMStatus = null; // Initialize early for signature matching
     
     const deviceModel = clientData.serverData?.deviceModel;
     const deviceBrand = clientData.serverData?.deviceBrand;
@@ -661,31 +700,20 @@ app.post('/log/:id', (req, res) => {
     const clientHintsModel = clientData.clientHintsData?.model;
     const clientHintsBrand = clientData.clientHintsData?.brand;
     
-    // Priority 2: Android GPU Fingerprinting (if brand/model is null/masked)
-    let androidFingerprint = null;
+    // Priority 2: Hardcoded Signature Map (check first for known signatures)
+    let signatureMatch = null;
     if ((!deviceBrand || !deviceModel || deviceModel === 'K') && gpuRenderer && screenWidth) {
-      console.log(`🤖 Device brand/model masked or null, attempting Android GPU fingerprinting...`);
-      androidFingerprint = identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight, pixelRatio);
+      console.log(`🔍 Checking hardcoded signature map...`);
+      signatureMatch = checkDeviceSignature(gpuRenderer, screenWidth);
       
-      if (androidFingerprint) {
-        deducedModel = androidFingerprint.displayName;
-        console.log(`✅ Android fingerprinting result: ${deducedModel}`);
+      if (signatureMatch) {
+        deducedModel = signatureMatch.deducedModel;
+        console.log(`✅ Signature map match: ${deducedModel}`);
         
-        // Special handling for Motorola Edge 50: Use direct search term mapping
-        let searchTerms = [];
-        if (gpuRenderer.toLowerCase().includes('adreno (tm) 710') && screenWidth === 432) {
-          // Direct mapping for Motorola Edge 50 signature
-          searchTerms = ['Motorola Edge 50', 'Motorola Moto G84', 'Moto Edge 50'];
-          console.log(`🔍 Motorola signature detected, using direct search terms: ${searchTerms.join(', ')}`);
-        } else {
-          // Use fingerprint models as search terms
-          searchTerms = androidFingerprint.models;
-        }
-        
-        // Try to find GSMA match for each search term (fuzzy matching)
+        // Search GSMA database using LIKE/Includes search
         let foundMatch = false;
-        for (const searchTerm of searchTerms) {
-          console.log(`[Fuzzy Matching] Input: "${searchTerm}"`);
+        for (const searchTerm of signatureMatch.searchTerms) {
+          console.log(`[GSMA LIKE Search] Input: "${searchTerm}"`);
           let result = searchGSMADevice(searchTerm);
           
           // Fallback to hardcoded list if database unavailable
@@ -697,7 +725,63 @@ app.post('/log/:id', (req, res) => {
           if (result) {
             gsmaData = result;
             foundMatch = true;
-            console.log(`[Fuzzy Matching] Result: ${gsmaData.standardised_full_name} | DeviceType: ${gsmaData.device_type || 'N/A'} | eSIM: ${gsmaData.euicc}`);
+            console.log(`[GSMA LIKE Search] Result: ${gsmaData.standardised_full_name} | DeviceType: ${gsmaData.device_type || 'N/A'} | eUICC: ${gsmaData.euicc}`);
+            
+            // Extract eUICC and set eSIMCompatible
+            if (gsmaData.euicc === 'true' || gsmaData.euicc === true) {
+              finalESIMStatus = true;
+              console.log(`✅ eUICC extracted: true → eSIMCompatible = true`);
+            } else if (gsmaData.euicc === 'false' || gsmaData.euicc === false) {
+              finalESIMStatus = false;
+              console.log(`✅ eUICC extracted: false → eSIMCompatible = false`);
+            }
+            break; // Use first match found
+          }
+        }
+        
+        if (foundMatch) {
+          matchConfidence = signatureMatch.confidence;
+          console.log(`✅ GSMA match found with confidence: ${matchConfidence}%`);
+        } else {
+          console.log(`❌ No GSMA match found for signature`);
+          matchConfidence = signatureMatch.confidence;
+        }
+      }
+    }
+    
+    // Priority 2b: Android GPU Fingerprinting (if no signature match)
+    let androidFingerprint = null;
+    if (!signatureMatch && (!deviceBrand || !deviceModel || deviceModel === 'K') && gpuRenderer && screenWidth) {
+      console.log(`🤖 Device brand/model masked or null, attempting Android GPU fingerprinting...`);
+      androidFingerprint = identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight, pixelRatio);
+      
+      if (androidFingerprint) {
+        deducedModel = androidFingerprint.displayName;
+        console.log(`✅ Android fingerprinting result: ${deducedModel}`);
+        
+        // Try to find GSMA match for each possible model (fuzzy matching with LIKE)
+        let foundMatch = false;
+        for (const model of androidFingerprint.models) {
+          console.log(`[Fuzzy Matching] Input: "${model}"`);
+          let result = searchGSMADevice(model);
+          
+          // Fallback to hardcoded list if database unavailable
+          if (!result) {
+            console.log(`⚠️  Database search failed, trying fallback list...`);
+            result = searchGSMADeviceFallback(model);
+          }
+          
+          if (result) {
+            gsmaData = result;
+            foundMatch = true;
+            console.log(`[Fuzzy Matching] Result: ${gsmaData.standardised_full_name} | DeviceType: ${gsmaData.device_type || 'N/A'} | eUICC: ${gsmaData.euicc}`);
+            
+            // Extract eUICC and set eSIMCompatible immediately
+            if (gsmaData.euicc === 'true' || gsmaData.euicc === true) {
+              console.log(`✅ eUICC extracted: true → eSIMCompatible = true`);
+            } else if (gsmaData.euicc === 'false' || gsmaData.euicc === false) {
+              console.log(`✅ eUICC extracted: false → eSIMCompatible = false`);
+            }
             break; // Use first match found
           }
         }
@@ -815,8 +899,8 @@ app.post('/log/:id', (req, res) => {
     }
     
     // Step B: Parse User-Agent to get primary brand/model hint
-    // Step C: Use advanced matching with screen resolution and GPU (if not iPhone/Android fingerprint)
-    if (!gsmaData && !androidFingerprint && !iphoneFingerprint && (deviceBrand || deviceModel)) {
+    // Step C: Use advanced matching with screen resolution and GPU (if not iPhone/Android fingerprint/signature)
+    if (!gsmaData && !signatureMatch && !androidFingerprint && !iphoneFingerprint && (deviceBrand || deviceModel)) {
       console.log(`🔎 Attempting advanced matching with brand/model...`);
       gsmaData = advancedDeviceMatch({
         brand: deviceBrand,
@@ -875,9 +959,9 @@ app.post('/log/:id', (req, res) => {
       }
     }
     
-    // Final eSIM status determination
+    // Final eSIM status determination (if not already set by signature matching)
     // Priority: GSMA matches (if all agree) > Fallback rule > Single GSMA match
-    let finalESIMStatus = null;
+    // Note: finalESIMStatus is already declared above, only set if not already set
     
     if (iphoneFingerprint && gsmaMatches && gsmaMatches.length > 0) {
       // For iPhone with multiple possible models, check if all GSMA matches agree
@@ -932,6 +1016,14 @@ app.post('/log/:id', (req, res) => {
       deviceModel: clientData.serverData?.deviceModel || null,
       deviceType: clientData.serverData?.deviceType || null,
       clientHints: clientData.serverData?.clientHints || null,
+      // High-entropy Client Hints from client-side (not null, contains captured data)
+      clientHintsData: clientData.clientHintsData || {
+        model: null,
+        brand: null,
+        platformVersion: null,
+        architecture: null,
+        brands: null
+      },
       // Client-side data
       fullUserAgent: clientData.fullUserAgent || null,
       screenWidth: clientData.screenWidth || null,
