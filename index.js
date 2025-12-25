@@ -186,26 +186,53 @@ function identifyiPhoneModel(screenWidth, screenHeight, pixelRatio, gpuRenderer 
       } else if (isUnique) {
         displayName = possibleModels[0];
       } else {
-        // Group models by series (extract common pattern)
-        const seriesPattern = possibleModels[0].match(/iPhone\s*(\d+)/);
-        if (seriesPattern) {
-          const numbers = possibleModels.map(m => {
-            const match = m.match(/iPhone\s*(\d+)/);
-            return match ? parseInt(match[1]) : null;
-          }).filter(n => n !== null).sort((a, b) => a - b);
+        // Group models by series with better formatting
+        // Extract numbers and variants (Pro, Max, Plus, etc.)
+        const modelInfo = possibleModels.map(m => {
+          const numMatch = m.match(/iPhone\s*(\d+)/);
+          const variantMatch = m.match(/iPhone\s*\d+\s*(Pro|Max|Plus|Mini)?/i);
+          return {
+            number: numMatch ? parseInt(numMatch[1]) : null,
+            variant: variantMatch ? variantMatch[1] : null,
+            full: m
+          };
+        });
+        
+        const numbers = modelInfo.map(m => m.number).filter(n => n !== null).sort((a, b) => a - b);
+        const variants = [...new Set(modelInfo.map(m => m.variant).filter(v => v))];
+        
+        if (numbers.length > 0) {
+          const minNum = numbers[0];
+          const maxNum = numbers[numbers.length - 1];
           
-          if (numbers.length > 0) {
-            const minNum = numbers[0];
-            const maxNum = numbers[numbers.length - 1];
-            if (minNum === maxNum) {
+          // Build series name
+          if (minNum === maxNum) {
+            // Same number, different variants
+            if (variants.length > 0) {
+              const variantStr = variants.map(v => v || 'Standard').join(' & ');
+              displayName = `iPhone ${minNum} ${variantStr} Series`;
+            } else {
               displayName = `iPhone ${minNum} Series`;
+            }
+          } else {
+            // Different numbers - format as "iPhone 12 / 13 / 14 Series" or "iPhone 12 / 13 / 14 Plus & Max Series"
+            if (variants.length > 0) {
+              // Group variants: if all have same variants, show them; otherwise show all variants
+              const uniqueVariants = [...new Set(variants.filter(v => v))];
+              if (uniqueVariants.length === 1) {
+                displayName = `iPhone ${minNum} / ${maxNum} ${uniqueVariants[0]} Series`;
+              } else if (uniqueVariants.length > 1) {
+                const variantStr = uniqueVariants.join(' & ');
+                displayName = `iPhone ${minNum} / ${maxNum} ${variantStr} Series`;
+              } else {
+                displayName = `iPhone ${minNum} / ${maxNum} Series`;
+              }
             } else {
               displayName = `iPhone ${minNum} / ${maxNum} Series`;
             }
-          } else {
-            displayName = possibleModels.join(' / ') + ' Series';
           }
         } else {
+          // Fallback: join all models
           displayName = possibleModels.join(' / ') + ' Series';
         }
       }
@@ -270,12 +297,15 @@ function isiPhoneESIMCompatible(iphoneModelOrModels) {
 }
 
 /**
- * Read scans from JSON file
+ * Read scans from JSON file (always from disk, no caching)
  */
 function readScans() {
   try {
+    // Always read fresh from disk to avoid stale data
     const data = fs.readFileSync(SCANS_FILE, 'utf8');
-    return JSON.parse(data);
+    const scans = JSON.parse(data);
+    console.log(`📖 Read ${scans.length} scan(s) from disk`);
+    return scans;
   } catch (error) {
     console.error('Error reading scans.json:', error);
     return [];
@@ -283,16 +313,55 @@ function readScans() {
 }
 
 /**
- * Write scans to JSON file
+ * Write scans to JSON file with atomic write
  */
 function writeScans(scans) {
   try {
-    fs.writeFileSync(SCANS_FILE, JSON.stringify(scans, null, 2));
+    // Use atomic write: write to temp file, then rename
+    const tempFile = SCANS_FILE + '.tmp';
+    fs.writeFileSync(tempFile, JSON.stringify(scans, null, 2), 'utf8');
+    fs.renameSync(tempFile, SCANS_FILE);
+    console.log(`💾 Wrote ${scans.length} scan(s) to disk`);
     return true;
   } catch (error) {
     console.error('Error writing scans.json:', error);
     return false;
   }
+}
+
+/**
+ * Update or create a scan by scanId
+ * This ensures we update existing scans instead of creating duplicates
+ */
+function upsertScan(scanData) {
+  const scans = readScans();
+  const existingIndex = scans.findIndex(s => s.scanId === scanData.scanId);
+  
+  if (existingIndex >= 0) {
+    // Update existing scan
+    console.log(`🔄 Updating existing scan ID: ${scanData.scanId}`);
+    scans[existingIndex] = scanData;
+  } else {
+    // Add new scan
+    console.log(`➕ Adding new scan ID: ${scanData.scanId}`);
+    scans.push(scanData);
+  }
+  
+  return writeScans(scans);
+}
+
+/**
+ * Get scan by ID (always reads fresh from disk)
+ */
+function getScanById(scanId) {
+  const scans = readScans();
+  const scan = scans.find(s => s.scanId === scanId);
+  if (scan) {
+    console.log(`🔍 Found scan ID: ${scanId}, Device: ${scan.deducedModel || scan.gsmaData?.standardisedFullName || 'Unknown'}`);
+  } else {
+    console.log(`❌ Scan ID not found: ${scanId}`);
+  }
+  return scan || null;
 }
 
 /**
@@ -347,6 +416,14 @@ app.get('/generate', async (req, res) => {
  */
 app.get('/s/:id', (req, res) => {
   const { id } = req.params;
+  
+  // Set cache headers to prevent browser caching
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  
+  console.log(`\n📱 Scan initiated for ID: ${id}`);
+  
   const userAgent = req.headers['user-agent'] || '';
   
   // Parse User-Agent using device-detector-js
@@ -367,6 +444,8 @@ app.get('/s/:id', (req, res) => {
     timestamp: new Date().toISOString()
   };
   
+  console.log(`📊 Server-side data captured - Brand: ${serverData.deviceBrand}, Model: ${serverData.deviceModel}, OS: ${serverData.os}`);
+  
   // Render the collector page with server data
   res.render('collector', {
     scanId: id,
@@ -382,8 +461,14 @@ app.post('/log/:id', (req, res) => {
   const { id } = req.params;
   const clientData = req.body;
   
+  // Set cache headers
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  
   try {
     console.log(`\n🔍 Starting device matching for scan ID: ${id}`);
+    console.log(`📋 Received client data - Screen: ${clientData.screenWidth}x${clientData.screenHeight}, GPU: ${clientData.gpuRenderer ? 'Yes' : 'No'}`);
     console.log(`📱 Device Brand: ${clientData.serverData?.deviceBrand || 'N/A'}`);
     console.log(`📱 Device Model: ${clientData.serverData?.deviceModel || 'N/A'}`);
     console.log(`📺 Screen: ${clientData.screenWidth || 'N/A'}x${clientData.screenHeight || 'N/A'}`);
@@ -405,6 +490,7 @@ app.post('/log/:id', (req, res) => {
     
     // iPhone Fingerprinting: If device is Apple/iPhone, use resolution-based identification
     let iphoneFingerprint = null;
+    let gsmaMatches = []; // Declare outside block for later use in eSIM determination
     if (deviceBrand && deviceBrand.toLowerCase().includes('apple') || 
         deviceModel && deviceModel.toLowerCase().includes('iphone')) {
       console.log(`🍎 Detected Apple device, attempting iPhone fingerprinting...`);
@@ -416,20 +502,41 @@ app.post('/log/:id', (req, res) => {
         console.log(`✅ iPhone fingerprinting result: ${deducedModel} (${iphoneFingerprint.models.length} possible model(s))`);
         
         // Try to find GSMA match for each possible model
+        // Collect all matches to verify eSIM compatibility across all models
         let foundMatch = false;
+        gsmaMatches = [];
+        
         for (const model of iphoneFingerprint.models) {
           console.log(`[Matching] Input: ${model}`);
           const result = searchGSMADevice(model);
           
           if (result) {
-            gsmaData = result;
-            foundMatch = true;
-            console.log(`[Matching] Result: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
-            break; // Use first match found
+            gsmaMatches.push(result);
+            if (!foundMatch) {
+              // Use first match as primary result (for admin view)
+              gsmaData = result;
+              foundMatch = true;
+            }
+            console.log(`[Matching] Result: ${result.standardised_full_name} | eSIM: ${result.euicc}`);
           }
         }
         
         if (foundMatch) {
+          // Verify eSIM compatibility across all matches
+          // If all matches agree on eUICC status, use that; otherwise use fallback
+          const euiccValues = gsmaMatches.map(m => m.euicc === 'true' || m.euicc === true);
+          const allAgree = euiccValues.length > 0 && euiccValues.every(v => v === euiccValues[0]);
+          
+          if (allAgree && gsmaMatches.length === iphoneFingerprint.models.length) {
+            // All models matched and agree on eSIM status
+            console.log(`✅ All ${gsmaMatches.length} model(s) matched in GSMA with consistent eSIM status: ${euiccValues[0]}`);
+          } else if (gsmaMatches.length < iphoneFingerprint.models.length) {
+            // Some models didn't match, use fallback for missing ones
+            console.log(`⚠️  Only ${gsmaMatches.length}/${iphoneFingerprint.models.length} model(s) matched in GSMA`);
+            eSIMFallback = isiPhoneESIMCompatible(iphoneFingerprint.models);
+            console.log(`📱 Applying iPhone eSIM fallback rule for unmatched models: ${eSIMFallback ? 'YES' : 'NO'}`);
+          }
+          
           // Confidence: 100% if unique match OR successfully refined, 50% if multiple models share resolution
           matchConfidence = iphoneFingerprint.isUnique ? 100 : 50;
           console.log(`✅ GSMA match found with confidence: ${matchConfidence}% (${iphoneFingerprint.isUnique ? 'unique' : 'multiple models possible'})`);
@@ -508,11 +615,37 @@ app.post('/log/:id', (req, res) => {
     }
     
     // Final eSIM status determination
+    // Priority: GSMA matches (if all agree) > Fallback rule > Single GSMA match
     let finalESIMStatus = null;
-    if (gsmaData) {
+    
+    if (iphoneFingerprint && gsmaMatches && gsmaMatches.length > 0) {
+      // For iPhone with multiple possible models, check if all GSMA matches agree
+      const euiccValues = gsmaMatches.map(m => m.euicc === 'true' || m.euicc === true);
+      const allAgree = euiccValues.length > 0 && euiccValues.every(v => v === euiccValues[0]);
+      
+      if (allAgree && gsmaMatches.length === iphoneFingerprint.models.length) {
+        // All models matched and agree on eSIM status
+        finalESIMStatus = euiccValues[0];
+        console.log(`📊 eUICC (eSIM) status from GSMA (all ${gsmaMatches.length} models agree): ${finalESIMStatus ? 'YES' : 'NO'}`);
+      } else if (allAgree && gsmaMatches.length > 0) {
+        // Some models matched and all agree
+        finalESIMStatus = euiccValues[0];
+        console.log(`📊 eUICC (eSIM) status from GSMA (${gsmaMatches.length} matches agree): ${finalESIMStatus ? 'YES' : 'NO'}`);
+      } else if (eSIMFallback !== null) {
+        // Use fallback if matches don't agree
+        finalESIMStatus = eSIMFallback;
+        console.log(`📊 eUICC (eSIM) status from fallback rule (GSMA matches inconsistent): ${finalESIMStatus ? 'YES' : 'NO'}`);
+      } else if (gsmaData) {
+        // Fallback to single match
+        finalESIMStatus = gsmaData.euicc === 'true' || gsmaData.euicc === true;
+        console.log(`📊 eUICC (eSIM) status from GSMA (single match): ${finalESIMStatus ? 'YES' : 'NO'}`);
+      }
+    } else if (gsmaData) {
+      // Single GSMA match (non-iPhone or unique iPhone)
       finalESIMStatus = gsmaData.euicc === 'true' || gsmaData.euicc === true;
       console.log(`📊 eUICC (eSIM) status from GSMA: ${finalESIMStatus ? 'YES' : 'NO'}`);
     } else if (eSIMFallback !== null) {
+      // Use fallback rule
       finalESIMStatus = eSIMFallback;
       console.log(`📊 eUICC (eSIM) status from fallback rule: ${finalESIMStatus ? 'YES' : 'NO'}`);
     } else {
@@ -569,22 +702,21 @@ app.post('/log/:id', (req, res) => {
       } : null,
       // eSIM fallback status (if GSMA lookup failed but fallback rule applies)
       eSIMFallback: eSIMFallback !== null ? eSIMFallback : null,
-      // Final eSIM status (from GSMA or fallback)
-      eSIMCompatible: finalESIMStatus
+      // Final eSIM status (from GSMA or fallback) - ALWAYS set if possible
+      eSIMCompatible: finalESIMStatus !== null ? finalESIMStatus : (gsmaData ? (gsmaData.euicc === 'true' || gsmaData.euicc === true) : null),
+      // Flag to indicate if match is based on resolution (not unique hardware ID)
+      isResolutionBased: iphoneFingerprint ? !iphoneFingerprint.isUnique : false
     };
     
-    // Read existing scans
-    const scans = readScans();
-    
-    // Add new scan
-    scans.push(scanData);
-    
-    // Write back to file
-    if (writeScans(scans)) {
+    // Upsert scan (update if exists, create if new)
+    // This ensures we always write to the correct scanId
+    if (upsertScan(scanData)) {
       console.log(`✅ Logged device data for scan ID: ${id}`);
+      console.log(`📊 Scan data - Device: ${deducedModel || deviceModel || 'Unknown'}, eSIM: ${scanData.eSIMCompatible}, GSMA: ${gsmaData ? 'Yes' : 'No'}`);
       res.json({
         success: true,
-        redirectUrl: scanData.redirectUrl
+        scanId: id,
+        redirectUrl: `/result/${id}`
       });
     } else {
       throw new Error('Failed to write to scans.json');
@@ -610,12 +742,19 @@ app.get('/health', (req, res) => {
  */
 app.get('/result/:id', (req, res) => {
   const { id } = req.params;
-  const scans = readScans();
   
-  // Find the scan by ID
-  const scan = scans.find(s => s.scanId === id);
+  // Set cache headers to prevent browser caching
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  
+  console.log(`\n🔍 Rendering Result for ID: ${id}`);
+  
+  // Always read fresh from disk (no caching)
+  const scan = getScanById(id);
   
   if (!scan) {
+    console.log(`❌ Scan ID not found: ${id}`);
     return res.status(404).send(`
       <html>
         <head><title>Scan Not Found</title></head>
@@ -628,10 +767,13 @@ app.get('/result/:id', (req, res) => {
     `);
   }
   
-  // Determine eSIM compatibility (use eSIMCompatible from scan data, or calculate from GSMA)
-  const eSIMCompatible = scan.eSIMCompatible !== null && scan.eSIMCompatible !== undefined 
-    ? scan.eSIMCompatible 
-    : (scan.gsmaData?.euicc === 'true' || scan.gsmaData?.euicc === true);
+  // Log what we're rendering
+  console.log(`✅ Rendering Result for ID: ${id}, Device: ${scan.deducedModel || scan.gsmaData?.standardisedFullName || scan.deviceModel || 'Unknown'}`);
+  console.log(`📊 eSIM Compatible: ${scan.eSIMCompatible}, GSMA Data: ${scan.gsmaData ? 'Yes' : 'No'}`);
+  
+  // Use eSIMCompatible from scan data (already calculated and saved)
+  // Don't recalculate - use what was saved
+  const eSIMCompatible = scan.eSIMCompatible;
   
   res.render('result', {
     scan: scan,
@@ -644,6 +786,12 @@ app.get('/result/:id', (req, res) => {
  * View scans endpoint - HTML view with interesting fields
  */
 app.get('/scans', (req, res) => {
+  // Set cache headers
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  
+  // Always read fresh from disk
   const scans = readScans();
   
   // If JSON format requested

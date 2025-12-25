@@ -318,9 +318,20 @@
                                 }) %>
                             </td>
                             <td>
-                                <strong><%= detectedModel %></strong>
-                                <% if (scan.gsmaData?.standardisedManufacturer) { %>
-                                    <br><small style="color: #666;"><%= scan.gsmaData.standardisedManufacturer %></small>
+                                <!-- Show GSMA match for admin (raw database hit) -->
+                                <% if (scan.gsmaData && scan.gsmaData.standardisedFullName) { %>
+                                    <strong><%= scan.gsmaData.standardisedFullName %></strong>
+                                    <% if (scan.gsmaData.standardisedManufacturer) { %>
+                                        <br><small style="color: #666;"><%= scan.gsmaData.standardisedManufacturer %></small>
+                                    <% } %>
+                                    <% if (scan.deducedModel && scan.deducedModel !== scan.gsmaData.standardisedFullName) { %>
+                                        <br><small style="color: #999; font-style: italic;">Series: <%= scan.deducedModel %></small>
+                                    <% } %>
+                                <% } else if (scan.deducedModel) { %>
+                                    <strong><%= scan.deducedModel %></strong>
+                                    <br><small style="color: #999; font-style: italic;">(No GSMA match)</small>
+                                <% } else { %>
+                                    <strong><%= detectedModel %></strong>
                                 <% } %>
                             </td>
                             <td>
