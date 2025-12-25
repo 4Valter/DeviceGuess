@@ -700,11 +700,23 @@ app.post('/log/:id', (req, res) => {
     const clientHintsModel = clientData.clientHintsData?.model;
     const clientHintsBrand = clientData.clientHintsData?.brand;
     
+    // Log Client Hints and Media Queries for diagnostics
+    console.log(`📊 Client Hints - Model: ${clientHintsModel || 'null'}, Brand: ${clientHintsBrand || 'null'}`);
+    console.log(`📊 Media Queries - isP3: ${clientData.mediaQueries?.isP3 || false}, isHDR: ${clientData.mediaQueries?.isHDR || false}`);
+    console.log(`📊 Device Memory: ${clientData.deviceMemory || 'null'}`);
+    
     // Priority 2: Hardcoded Signature Map (check first for known signatures)
+    // Heuristic: If clientHints.model is null but we have Motorola signature, use it
     let signatureMatch = null;
-    if ((!deviceBrand || !deviceModel || deviceModel === 'K') && gpuRenderer && screenWidth) {
+    // Check signature if: brand/model is masked/null OR Client Hints model is null
+    if ((!deviceBrand || !deviceModel || deviceModel === 'K' || !clientHintsModel) && gpuRenderer && screenWidth) {
       console.log(`🔍 Checking hardcoded signature map...`);
       signatureMatch = checkDeviceSignature(gpuRenderer, screenWidth);
+      
+      // Special case: If Client Hints model is null but we have Motorola signature
+      if (!clientHintsModel && signatureMatch && gpuRenderer.toLowerCase().includes('adreno (tm) 710') && screenWidth === 432) {
+        console.log(`🔍 Client Hints model is null, but Motorola signature detected - using signature fallback: ${signatureMatch.deducedModel}`);
+      }
       
       if (signatureMatch) {
         deducedModel = signatureMatch.deducedModel;
@@ -1032,9 +1044,15 @@ app.post('/log/:id', (req, res) => {
       gpuRenderer: clientData.gpuRenderer || null,
       gpuVendor: clientData.gpuVendor || null,
       hardwareConcurrency: clientData.hardwareConcurrency || null,
-      deviceMemory: clientData.deviceMemory || null, // RAM in GB (can be 'unknown')
+      deviceMemory: clientData.deviceMemory || null, // RAM in GB (null if not available)
       timezone: clientData.timezone || null, // Timezone for regional variants
-      mediaQueries: clientData.mediaQueries || null, // P3, HDR, etc. for high-end device detection
+      // Media Queries (always an object, never null)
+      mediaQueries: clientData.mediaQueries || {
+        isP3: false,
+        isHDR: false,
+        isWideColorGamut: false,
+        prefersColorScheme: null
+      },
       batteryLevel: clientData.batteryLevel !== undefined ? clientData.batteryLevel : null,
       batteryCharging: clientData.batteryCharging !== undefined ? clientData.batteryCharging : null,
       redirectUrl: clientData.redirectUrl || DEFAULT_REDIRECT_URL,
