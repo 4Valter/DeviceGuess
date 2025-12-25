@@ -200,12 +200,18 @@
             <div class="device-name">
                 <% if (scan.gsmaData && scan.gsmaData.standardisedFullName) { %>
                     <%= scan.gsmaData.standardisedFullName %>
-                    <% if (scan.deducedModel) { %>
+                    <% if (scan.deducedModel && scan.iphoneFingerprint && !scan.iphoneFingerprint.isUnique) { %>
+                        <br><small style="font-size: 14px; color: #666;">(Identifié: <%= scan.deducedModel %> - <%= scan.iphoneFingerprint.models.length %> modèle(s) possible(s))</small>
+                    <% } else if (scan.deducedModel) { %>
                         <br><small style="font-size: 14px; color: #666;">(Identifié via fingerprinting: <%= scan.deducedModel %>)</small>
                     <% } %>
                 <% } else if (scan.deducedModel) { %>
                     <%= scan.deducedModel %>
-                    <br><small style="font-size: 14px; color: #666;">(Identifié via fingerprinting)</small>
+                    <% if (scan.iphoneFingerprint && !scan.iphoneFingerprint.isUnique) { %>
+                        <br><small style="font-size: 14px; color: #666;">(<%= scan.iphoneFingerprint.models.length %> modèle(s) partagent cette résolution)</small>
+                    <% } else { %>
+                        <br><small style="font-size: 14px; color: #666;">(Identifié via fingerprinting)</small>
+                    <% } %>
                 <% } else if (scan.deviceBrand || scan.deviceModel) { %>
                     <%= scan.deviceBrand || 'Unknown' %> <%= scan.deviceModel || '' %>
                 <% } else { %>

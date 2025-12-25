@@ -290,9 +290,12 @@
                 <tbody>
                     <% scans.reverse().forEach((scan, index) => { 
                         const detectedModel = scan.gsmaData?.standardisedFullName || 
+                                             scan.deducedModel ||
                                              (scan.deviceBrand && scan.deviceModel ? `${scan.deviceBrand} ${scan.deviceModel}`.trim() : 'Not detected');
-                        const eSIMStatus = scan.gsmaData?.euicc;
-                        const eSIMCompatible = eSIMStatus === 'true' || eSIMStatus === true;
+                        // Use eSIMCompatible from scan data (from GSMA or fallback), or calculate from GSMA
+                        const eSIMCompatible = scan.eSIMCompatible !== null && scan.eSIMCompatible !== undefined 
+                            ? scan.eSIMCompatible 
+                            : (scan.gsmaData?.euicc === 'true' || scan.gsmaData?.euicc === true);
                         const confidence = scan.matchConfidence || 0;
                         let confidenceClass = 'confidence-none';
                         let confidenceText = 'N/A';
