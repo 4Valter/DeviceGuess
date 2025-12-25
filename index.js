@@ -199,13 +199,14 @@ function refineiPhoneModel(gpuRenderer, hardwareConcurrency, possibleModels) {
 
 /**
  * Android GPU & Resolution Fingerprinting Table
- * Maps GPU renderer + screen width to device series
+ * Maps GPU renderer + screen width + pixel ratio to device series
  * @param {string} gpuRenderer - GPU renderer string
  * @param {number} screenWidth - Screen width in pixels
  * @param {number} screenHeight - Screen height in pixels
+ * @param {number} pixelRatio - Device pixel ratio
  * @returns {Object|null} Object with displayName and models array, or null
  */
-function identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight) {
+function identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight, pixelRatio) {
   if (!gpuRenderer || !screenWidth) {
     return null;
   }
@@ -215,52 +216,62 @@ function identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight) {
   
   // Android GPU fingerprinting table
   const androidFingerprints = [
-    // Motorola Edge 50 / Moto G Series
+    // Motorola Edge 50 / Moto G Series - Specific signature with pixelRatio
     {
       gpu: 'adreno (tm) 710',
       width: 432,
       height: 984,
-      displayName: 'Motorola Edge 50 / Moto G84 Series',
-      models: ['Motorola Edge 50', 'Moto G84', 'Moto G84 5G']
+      pixelRatio: 2.5, // Specific to Motorola Edge 50
+      displayName: 'Motorola Edge 50 / Moto G Series',
+      models: ['Motorola Edge 50', 'Moto G84', 'Moto G84 5G'],
+      confidence: 85
     },
     // Google Pixel 7 / 7a Series
     {
       gpu: 'mali-g710',
       width: 412,
       height: 915,
+      pixelRatio: null, // Not specified
       displayName: 'Google Pixel 7 / 7a Series',
-      models: ['Google Pixel 7', 'Google Pixel 7a', 'Google Pixel 7 Pro']
+      models: ['Google Pixel 7', 'Google Pixel 7a', 'Google Pixel 7 Pro'],
+      confidence: 80
     },
     // Samsung Galaxy S23 / S24 Series (Snapdragon)
     {
       gpu: 'adreno (tm) 740',
       width: 360,
       height: 780,
+      pixelRatio: null,
       displayName: 'Samsung Galaxy S23 / S24 Series',
-      models: ['Samsung Galaxy S23', 'Samsung Galaxy S24', 'Samsung Galaxy S23 Ultra']
+      models: ['Samsung Galaxy S23', 'Samsung Galaxy S24', 'Samsung Galaxy S23 Ultra'],
+      confidence: 80
     },
     // OnePlus 11 / 12 Series
     {
       gpu: 'adreno (tm) 740',
       width: 412,
       height: 915,
+      pixelRatio: null,
       displayName: 'OnePlus 11 / 12 Series',
-      models: ['OnePlus 11', 'OnePlus 12', 'OnePlus 11 Pro']
+      models: ['OnePlus 11', 'OnePlus 12', 'OnePlus 11 Pro'],
+      confidence: 80
     }
   ];
   
-  // Try to find match (allow ±2px tolerance for screen dimensions)
+  // Try to find match (allow ±2px tolerance for screen dimensions, ±0.1 for pixelRatio)
   for (const fingerprint of androidFingerprints) {
     if (normalizedGPU.includes(fingerprint.gpu.toLowerCase())) {
       const widthMatch = Math.abs(screenWidth - fingerprint.width) <= 2;
       const heightMatch = !fingerprint.height || Math.abs(screenHeight - fingerprint.height) <= 2;
+      const pixelRatioMatch = !fingerprint.pixelRatio || (pixelRatio && Math.abs(pixelRatio - fingerprint.pixelRatio) <= 0.1);
       
-      if (widthMatch && heightMatch) {
-        console.log(`🤖 Android fingerprint match: ${fingerprint.displayName} (GPU: ${gpuRenderer}, Screen: ${screenWidth}x${screenHeight})`);
+      if (widthMatch && heightMatch && pixelRatioMatch) {
+        console.log(`🤖 Android fingerprint match: ${fingerprint.displayName} (GPU: ${gpuRenderer}, Screen: ${screenWidth}x${screenHeight}, PixelRatio: ${pixelRatio || 'N/A'})`);
         return {
           displayName: fingerprint.displayName,
           models: fingerprint.models,
-          isUnique: fingerprint.models.length === 1
+          isUnique: fingerprint.models.length === 1,
+          confidence: fingerprint.confidence || 75
         };
       }
     }
@@ -460,36 +471,53 @@ function writeScans(scans) {
 }
 
 /**
- * Update or create a scan by scanId
- * This ensures we update existing scans instead of creating duplicates
+ * Add a new scan entry (always create new, never update)
+ * scanId is treated as a "Session ID" or "Batch ID"
+ * Each scan gets a unique internal record ID
  */
-function upsertScan(scanData) {
+function addNewScan(scanData) {
   const scans = readScans();
-  const existingIndex = scans.findIndex(s => s.scanId === scanData.scanId);
   
-  if (existingIndex >= 0) {
-    // Update existing scan
-    console.log(`🔄 Updating existing scan ID: ${scanData.scanId}`);
-    scans[existingIndex] = scanData;
-  } else {
-    // Add new scan
-    console.log(`➕ Adding new scan ID: ${scanData.scanId}`);
-    scans.push(scanData);
-  }
+  // Always add as new entry (scanId is session ID, internalId is unique record ID)
+  console.log(`➕ Adding new scan record - Session ID: ${scanData.scanId}, Record ID: ${scanData.internalId}`);
+  scans.push(scanData);
   
   return writeScans(scans);
 }
 
 /**
- * Get scan by ID (always reads fresh from disk)
+ * Get scan by session ID (returns the latest scan for that session)
+ * Always reads fresh from disk
  */
-function getScanById(scanId) {
+function getScanBySessionId(sessionId) {
   const scans = readScans();
-  const scan = scans.find(s => s.scanId === scanId);
-  if (scan) {
-    console.log(`🔍 Found scan ID: ${scanId}, Device: ${scan.deducedModel || scan.gsmaData?.standardisedFullName || 'Unknown'}`);
+  // Find all scans with this session ID, return the most recent one
+  const matchingScans = scans.filter(s => s.scanId === sessionId);
+  
+  if (matchingScans.length > 0) {
+    // Sort by timestamp descending, get the latest
+    const latestScan = matchingScans.sort((a, b) => 
+      new Date(b.timestamp) - new Date(a.timestamp)
+    )[0];
+    console.log(`🔍 Found ${matchingScans.length} scan(s) for session ID: ${sessionId}, returning latest`);
+    console.log(`📊 Latest scan - Record ID: ${latestScan.internalId}, Device: ${latestScan.deducedModel || latestScan.gsmaData?.standardisedFullName || 'Unknown'}`);
+    return latestScan;
   } else {
-    console.log(`❌ Scan ID not found: ${scanId}`);
+    console.log(`❌ No scans found for session ID: ${sessionId}`);
+    return null;
+  }
+}
+
+/**
+ * Get scan by internal record ID
+ */
+function getScanByInternalId(internalId) {
+  const scans = readScans();
+  const scan = scans.find(s => s.internalId === internalId);
+  if (scan) {
+    console.log(`🔍 Found scan by internal ID: ${internalId}, Device: ${scan.deducedModel || scan.gsmaData?.standardisedFullName || 'Unknown'}`);
+  } else {
+    console.log(`❌ Scan with internal ID not found: ${internalId}`);
   }
   return scan || null;
 }
@@ -637,7 +665,7 @@ app.post('/log/:id', (req, res) => {
     let androidFingerprint = null;
     if ((!deviceBrand || !deviceModel || deviceModel === 'K') && gpuRenderer && screenWidth) {
       console.log(`🤖 Device brand/model masked or null, attempting Android GPU fingerprinting...`);
-      androidFingerprint = identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight);
+      androidFingerprint = identifyAndroidByGPU(gpuRenderer, screenWidth, screenHeight, pixelRatio);
       
       if (androidFingerprint) {
         deducedModel = androidFingerprint.displayName;
@@ -647,7 +675,13 @@ app.post('/log/:id', (req, res) => {
         let foundMatch = false;
         for (const model of androidFingerprint.models) {
           console.log(`[Matching] Input: ${model}`);
-          const result = searchGSMADevice(model);
+          let result = searchGSMADevice(model);
+          
+          // Fallback to hardcoded list if database unavailable
+          if (!result) {
+            console.log(`⚠️  Database search failed, trying fallback list...`);
+            result = searchGSMADeviceFallback(model);
+          }
           
           if (result) {
             gsmaData = result;
@@ -658,11 +692,12 @@ app.post('/log/:id', (req, res) => {
         }
         
         if (foundMatch) {
-          matchConfidence = androidFingerprint.isUnique ? 100 : 50;
+          // Use fingerprint confidence if specified, otherwise default
+          matchConfidence = androidFingerprint.confidence || (androidFingerprint.isUnique ? 100 : 50);
           console.log(`✅ GSMA match found with confidence: ${matchConfidence}%`);
         } else {
           console.log(`❌ No GSMA match found for Android fingerprint`);
-          matchConfidence = 50; // Medium confidence for fingerprint match without GSMA
+          matchConfidence = androidFingerprint.confidence || 50; // Use fingerprint confidence
         }
       }
     }
@@ -867,9 +902,13 @@ app.post('/log/:id', (req, res) => {
       console.log(`❌ No GSMA match found and no fallback rule applicable`);
     }
     
+    // Generate unique internal record ID (scanId is session ID, internalId is unique record)
+    const internalId = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    
     // Merge server and client data
     const scanData = {
-      scanId: id,
+      internalId: internalId, // Unique record ID (always new)
+      scanId: id, // Session/Batch ID (can be reused)
       timestamp: new Date().toISOString(),
       // Server-side data
       ip: clientData.serverData?.ip || null,
@@ -890,9 +929,13 @@ app.post('/log/:id', (req, res) => {
       gpuRenderer: clientData.gpuRenderer || null,
       gpuVendor: clientData.gpuVendor || null,
       hardwareConcurrency: clientData.hardwareConcurrency || null,
+      deviceMemory: clientData.deviceMemory || null, // RAM in GB
+      timezone: clientData.timezone || null, // Timezone for regional variants
       batteryLevel: clientData.batteryLevel !== undefined ? clientData.batteryLevel : null,
       batteryCharging: clientData.batteryCharging !== undefined ? clientData.batteryCharging : null,
       redirectUrl: clientData.redirectUrl || DEFAULT_REDIRECT_URL,
+      // Hardware signature for easy auditing (Resolution + GPU)
+      hardwareSignature: `${clientData.screenWidth || '?'}x${clientData.screenHeight || '?'}@${clientData.pixelRatio || '?'}x | ${clientData.gpuRenderer ? clientData.gpuRenderer.substring(0, 30) : 'No GPU'}`,
       // GSMA database enrichment
       gsmaData: gsmaData ? {
         standardisedFullName: gsmaData.standardised_full_name,
@@ -923,15 +966,15 @@ app.post('/log/:id', (req, res) => {
       isResolutionBased: iphoneFingerprint ? !iphoneFingerprint.isUnique : false
     };
     
-    // Upsert scan (update if exists, create if new)
-    // This ensures we always write to the correct scanId
-    if (upsertScan(scanData)) {
-      console.log(`✅ Logged device data for scan ID: ${id}`);
+    // Always create new scan entry (scanId is session ID, internalId is unique record)
+    if (addNewScan(scanData)) {
+      console.log(`✅ Logged device data - Session ID: ${id}, Record ID: ${internalId}`);
       console.log(`📊 Scan data - Device: ${deducedModel || deviceModel || 'Unknown'}, eSIM: ${scanData.eSIMCompatible}, GSMA: ${gsmaData ? 'Yes' : 'No'}`);
       res.json({
         success: true,
-        scanId: id,
-        redirectUrl: `/result/${id}`
+        scanId: id, // Session ID for redirect
+        internalId: internalId, // Unique record ID
+        redirectUrl: `/result/${id}` // Use session ID for result page
       });
     } else {
       throw new Error('Failed to write to scans.json');
@@ -963,10 +1006,10 @@ app.get('/result/:id', (req, res) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   
-  console.log(`\n🔍 Rendering Result for ID: ${id}`);
+  console.log(`\n🔍 Rendering Result for Session ID: ${id}`);
   
-  // Always read fresh from disk (no caching)
-  const scan = getScanById(id);
+  // Get latest scan for this session ID (always read fresh from disk)
+  const scan = getScanBySessionId(id);
   
   if (!scan) {
     console.log(`❌ Scan ID not found: ${id}`);

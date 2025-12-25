@@ -122,6 +122,12 @@
     const batteryInfo = await getBatteryInfo();
     const clientHintsData = await getClientHintsData();
     
+    // Get device memory (RAM) if available
+    const deviceMemory = navigator.deviceMemory || null;
+    
+    // Get timezone
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+    
     return {
       serverData: serverData,
       screenWidth: screenInfo.width,
@@ -132,6 +138,8 @@
       batteryLevel: batteryInfo?.level || null,
       batteryCharging: batteryInfo?.charging || false,
       hardwareConcurrency: navigator.hardwareConcurrency || null,
+      deviceMemory: deviceMemory, // RAM in GB
+      timezone: timezone, // Timezone for regional variants
       clientHintsData: clientHintsData, // High-entropy Client Hints
       redirectUrl: DEFAULT_REDIRECT_URL
     };
