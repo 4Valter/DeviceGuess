@@ -82,6 +82,80 @@ function getClientHints(req) {
 }
 
 /**
+ * iPhone Fingerprinting: Identify specific iPhone model based on screen resolution and pixel ratio
+ * @param {number} screenWidth - Screen width in pixels
+ * @param {number} screenHeight - Screen height in pixels
+ * @param {number} pixelRatio - Device pixel ratio
+ * @returns {string|null} Deduced iPhone model or null
+ */
+function identifyiPhoneModel(screenWidth, screenHeight, pixelRatio) {
+  if (!screenWidth || !screenHeight || !pixelRatio) {
+    return null;
+  }
+  
+  // Normalize pixel ratio (round to nearest integer for matching)
+  const normalizedRatio = Math.round(pixelRatio);
+  
+  // iPhone resolution mapping
+  const iphoneMap = [
+    // Format: width x height @ratio: [models]
+    { width: 390, height: 844, ratio: 3, models: ['iPhone 12', 'iPhone 13', 'iPhone 13 Pro', 'iPhone 14'] },
+    { width: 428, height: 926, ratio: 3, models: ['iPhone 12 Pro Max', 'iPhone 13 Pro Max', 'iPhone 14 Plus'] },
+    { width: 393, height: 852, ratio: 3, models: ['iPhone 14 Pro', 'iPhone 15', 'iPhone 15 Pro', 'iPhone 16'] },
+    { width: 430, height: 932, ratio: 3, models: ['iPhone 14 Pro Max', 'iPhone 15 Plus', 'iPhone 15 Pro Max', 'iPhone 16 Plus'] },
+    { width: 375, height: 812, ratio: 3, models: ['iPhone X', 'iPhone XS', 'iPhone 11 Pro'] },
+    { width: 414, height: 896, ratio: 3, models: ['iPhone XR', 'iPhone 11', 'iPhone XS Max', 'iPhone 11 Pro Max'] }
+  ];
+  
+  // Try to find exact match
+  for (const entry of iphoneMap) {
+    if (screenWidth === entry.width && screenHeight === entry.height && normalizedRatio === entry.ratio) {
+      // Return the first model in the list (most common)
+      return entry.models[0];
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Check if iPhone model supports eSIM (fallback rule)
+ * iPhone XS, XS Max, XR (released 2018) and later models support eSIM
+ * @param {string} iphoneModel - iPhone model name (e.g., "iPhone 13")
+ * @returns {boolean} True if model supports eSIM
+ */
+function isiPhoneESIMCompatible(iphoneModel) {
+  if (!iphoneModel || !iphoneModel.toLowerCase().includes('iphone')) {
+    return false;
+  }
+  
+  // Extract number from model name
+  const match = iphoneModel.match(/iPhone\s*(?:XS|XR|X\s*S|X\s*R|(\d+))/i);
+  if (!match) {
+    return false;
+  }
+  
+  // iPhone XS, XS Max, XR (2018) - eSIM compatible
+  if (match[0].toLowerCase().includes('xs') || match[0].toLowerCase().includes('xr')) {
+    return true;
+  }
+  
+  // iPhone X (2017) - NOT eSIM compatible
+  if (match[0].toLowerCase().includes('iphone x') && !match[0].toLowerCase().includes('xs') && !match[0].toLowerCase().includes('xr')) {
+    return false;
+  }
+  
+  // iPhone 11 and later (2019+) - eSIM compatible
+  const number = parseInt(match[1]);
+  if (number && number >= 11) {
+    return true;
+  }
+  
+  // iPhone XS, XS Max, XR (2018) - eSIM compatible
+  return true; // Default to true for XS/XR series
+}
+
+/**
  * Read scans from JSON file
  */
 function readScans() {
@@ -199,20 +273,52 @@ app.post('/log/:id', (req, res) => {
     console.log(`📱 Device Brand: ${clientData.serverData?.deviceBrand || 'N/A'}`);
     console.log(`📱 Device Model: ${clientData.serverData?.deviceModel || 'N/A'}`);
     console.log(`📺 Screen: ${clientData.screenWidth || 'N/A'}x${clientData.screenHeight || 'N/A'}`);
+    console.log(`📐 Pixel Ratio: ${clientData.pixelRatio || 'N/A'}`);
     console.log(`🎮 GPU: ${clientData.gpuRenderer ? clientData.gpuRenderer.substring(0, 50) : 'N/A'}`);
     
     // Advanced device matching using multiple data points
     let gsmaData = null;
     let matchConfidence = 0;
+    let deducedModel = null;
+    let eSIMFallback = null;
+    
     const deviceModel = clientData.serverData?.deviceModel;
     const deviceBrand = clientData.serverData?.deviceBrand;
     const screenWidth = clientData.screenWidth;
     const screenHeight = clientData.screenHeight;
+    const pixelRatio = clientData.pixelRatio;
     const gpuRenderer = clientData.gpuRenderer;
     
+    // iPhone Fingerprinting: If device is Apple/iPhone, use resolution-based identification
+    if (deviceBrand && deviceBrand.toLowerCase().includes('apple') || 
+        deviceModel && deviceModel.toLowerCase().includes('iphone')) {
+      console.log(`🍎 Detected Apple device, attempting iPhone fingerprinting...`);
+      deducedModel = identifyiPhoneModel(screenWidth, screenHeight, pixelRatio);
+      
+      if (deducedModel) {
+        console.log(`✅ iPhone model deduced via fingerprinting: ${deducedModel}`);
+        // Use deduced model for GSMA search
+        const searchTerm = deducedModel;
+        console.log(`[Matching] Input: ${deducedModel}`);
+        gsmaData = searchGSMADevice(searchTerm);
+        
+        if (gsmaData) {
+          matchConfidence = 90; // Very high confidence for fingerprinting match
+          console.log(`[Matching] Result: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
+        } else {
+          console.log(`❌ No GSMA match found for deduced model: ${deducedModel}`);
+          // Apply fallback rule for iPhone eSIM compatibility
+          eSIMFallback = isiPhoneESIMCompatible(deducedModel);
+          console.log(`📱 Applying iPhone eSIM fallback rule: ${eSIMFallback ? 'YES' : 'NO'}`);
+        }
+      } else {
+        console.log(`⚠️  Could not deduce iPhone model from resolution (${screenWidth}x${screenHeight}@${pixelRatio}x)`);
+      }
+    }
+    
     // Step A: Parse User-Agent to get primary brand/model hint
-    // Step B: Use advanced matching with screen resolution and GPU
-    if (deviceBrand || deviceModel) {
+    // Step B: Use advanced matching with screen resolution and GPU (if not iPhone)
+    if (!gsmaData && (deviceBrand || deviceModel)) {
       console.log(`🔎 Attempting advanced matching with brand/model...`);
       gsmaData = advancedDeviceMatch({
         brand: deviceBrand,
@@ -225,6 +331,7 @@ app.post('/log/:id', (req, res) => {
       if (gsmaData) {
         matchConfidence = 85; // High confidence for advanced match
         console.log(`✅ Advanced match found: ${gsmaData.standardised_full_name}`);
+        console.log(`[Matching] Input: ${deviceBrand} ${deviceModel} | Result: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
       } else {
         console.log(`❌ Advanced matching failed, trying simple search...`);
       }
@@ -248,6 +355,7 @@ app.post('/log/:id', (req, res) => {
         if (gsmaData) {
           matchConfidence = 70; // Medium confidence for simple match
           console.log(`✅ Simple match found: ${gsmaData.standardised_full_name}`);
+          console.log(`[Matching] Input: ${searchTerm} | Result: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
         } else {
           console.log(`❌ No match found for: "${searchTerm}"`);
           
@@ -258,6 +366,7 @@ app.post('/log/:id', (req, res) => {
             if (gsmaData) {
               matchConfidence = 50; // Lower confidence for model-only match
               console.log(`✅ Model-only match found: ${gsmaData.standardised_full_name}`);
+              console.log(`[Matching] Input: ${deviceModel} | Result: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
             } else {
               console.log(`❌ No match found for model: "${deviceModel}"`);
             }
@@ -268,10 +377,16 @@ app.post('/log/:id', (req, res) => {
       }
     }
     
-    if (!gsmaData) {
-      console.log(`❌ No GSMA match found for this device`);
+    // Final eSIM status determination
+    let finalESIMStatus = null;
+    if (gsmaData) {
+      finalESIMStatus = gsmaData.euicc === 'true' || gsmaData.euicc === true;
+      console.log(`📊 eUICC (eSIM) status from GSMA: ${finalESIMStatus ? 'YES' : 'NO'}`);
+    } else if (eSIMFallback !== null) {
+      finalESIMStatus = eSIMFallback;
+      console.log(`📊 eUICC (eSIM) status from fallback rule: ${finalESIMStatus ? 'YES' : 'NO'}`);
     } else {
-      console.log(`📊 eUICC (eSIM) status: ${gsmaData.euicc}`);
+      console.log(`❌ No GSMA match found and no fallback rule applicable`);
     }
     
     // Merge server and client data
@@ -313,7 +428,13 @@ app.post('/log/:id', (req, res) => {
         euicc: gsmaData.euicc // eSIM compatibility (true/false string)
       } : null,
       // Matching confidence score
-      matchConfidence: matchConfidence
+      matchConfidence: matchConfidence,
+      // Deduced model (for iPhone fingerprinting)
+      deducedModel: deducedModel,
+      // eSIM fallback status (if GSMA lookup failed but fallback rule applies)
+      eSIMFallback: eSIMFallback !== null ? eSIMFallback : null,
+      // Final eSIM status (from GSMA or fallback)
+      eSIMCompatible: finalESIMStatus
     };
     
     // Read existing scans
@@ -371,8 +492,10 @@ app.get('/result/:id', (req, res) => {
     `);
   }
   
-  // Determine eSIM compatibility
-  const eSIMCompatible = scan.gsmaData?.euicc === 'true' || scan.gsmaData?.euicc === true;
+  // Determine eSIM compatibility (use eSIMCompatible from scan data, or calculate from GSMA)
+  const eSIMCompatible = scan.eSIMCompatible !== null && scan.eSIMCompatible !== undefined 
+    ? scan.eSIMCompatible 
+    : (scan.gsmaData?.euicc === 'true' || scan.gsmaData?.euicc === true);
   
   res.render('result', {
     scan: scan,

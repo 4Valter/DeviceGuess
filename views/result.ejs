@@ -200,6 +200,12 @@
             <div class="device-name">
                 <% if (scan.gsmaData && scan.gsmaData.standardisedFullName) { %>
                     <%= scan.gsmaData.standardisedFullName %>
+                    <% if (scan.deducedModel) { %>
+                        <br><small style="font-size: 14px; color: #666;">(Identifié via fingerprinting: <%= scan.deducedModel %>)</small>
+                    <% } %>
+                <% } else if (scan.deducedModel) { %>
+                    <%= scan.deducedModel %>
+                    <br><small style="font-size: 14px; color: #666;">(Identifié via fingerprinting)</small>
                 <% } else if (scan.deviceBrand || scan.deviceModel) { %>
                     <%= scan.deviceBrand || 'Unknown' %> <%= scan.deviceModel || '' %>
                 <% } else { %>
@@ -207,11 +213,16 @@
                 <% } %>
             </div>
             
-            <div class="esim-status <%= eSIMCompatible ? 'yes' : (scan.gsmaData ? 'no' : 'unknown') %>">
-                <% if (scan.gsmaData) { %>
-                    eSIM Support: <%= eSIMCompatible ? '✅ YES' : '❌ NO' %>
+            <div class="esim-status <%= scan.eSIMCompatible === true ? 'yes' : (scan.eSIMCompatible === false ? 'no' : 'unknown') %>">
+                <% if (scan.eSIMCompatible !== null && scan.eSIMCompatible !== undefined) { %>
+                    eSIM Compatible: <%= scan.eSIMCompatible ? '✅ YES' : '❌ NO' %>
+                    <% if (scan.eSIMFallback !== null) { %>
+                        <br><small style="font-size: 14px; opacity: 0.9;">(via règle de fallback iPhone)</small>
+                    <% } else if (scan.gsmaData) { %>
+                        <br><small style="font-size: 14px; opacity: 0.9;">(depuis base GSMA)</small>
+                    <% } %>
                 <% } else { %>
-                    eSIM Support: ❓ UNKNOWN
+                    eSIM Compatible: ❓ UNKNOWN
                 <% } %>
             </div>
             
