@@ -73,7 +73,8 @@ function initDatabase() {
 }
 
 /**
- * Search device by Marketing Name or Model Name
+ * Search device by Marketing Name or Model Name with fuzzy matching
+ * Priority: Smartphone devices > Other device types
  * @param {string} searchTerm - The device name to search for
  * @returns {Object|null} Device information or null if not found
  */
@@ -94,7 +95,7 @@ function searchDevice(searchTerm) {
   try {
     const cleanTerm = searchTerm.trim();
     
-    // Try exact match first (case-insensitive)
+    // Strategy 1: Try exact match first (case-insensitive)
     let stmt = db.prepare(`
       SELECT * FROM devices 
       WHERE LOWER(standardised_full_name) = LOWER(?)
@@ -103,23 +104,45 @@ function searchDevice(searchTerm) {
     
     let result = stmt.get(cleanTerm);
     
-    // If no exact match, try partial match
+    // Strategy 2: If no exact match, try "STARTS WITH" match (prioritize Smartphone)
     if (!result) {
       stmt = db.prepare(`
         SELECT * FROM devices 
         WHERE LOWER(standardised_full_name) LIKE LOWER(?)
+        ORDER BY CASE 
+          WHEN LOWER(device_type) = 'smartphone' THEN 1
+          ELSE 2
+        END
+        LIMIT 1
+      `);
+      result = stmt.get(`${cleanTerm}%`);
+    }
+    
+    // Strategy 3: If no "starts with" match, try "CONTAINS" match (prioritize Smartphone)
+    if (!result) {
+      stmt = db.prepare(`
+        SELECT * FROM devices 
+        WHERE LOWER(standardised_full_name) LIKE LOWER(?)
+        ORDER BY CASE 
+          WHEN LOWER(device_type) = 'smartphone' THEN 1
+          ELSE 2
+        END
         LIMIT 1
       `);
       result = stmt.get(`%${cleanTerm}%`);
     }
     
-    // If still no match, try searching in reverse (if searchTerm contains the model)
+    // Strategy 4: If still no match, try searching individual words (prioritize Smartphone)
     if (!result && cleanTerm.length > 3) {
       const words = cleanTerm.split(/\s+/).filter(w => w.length > 2);
       for (const word of words) {
         stmt = db.prepare(`
           SELECT * FROM devices 
           WHERE LOWER(standardised_full_name) LIKE LOWER(?)
+          ORDER BY CASE 
+            WHEN LOWER(device_type) = 'smartphone' THEN 1
+            ELSE 2
+          END
           LIMIT 1
         `);
         result = stmt.get(`%${word}%`);

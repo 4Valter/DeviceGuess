@@ -114,6 +114,30 @@
   }
 
   /**
+   * Get Media Query features (screen quality indicators)
+   * These help distinguish high-end devices like Motorola Edge 50
+   */
+  function getMediaQueryFeatures() {
+    try {
+      return {
+        isP3: window.matchMedia('(color-gamut: p3)').matches, // High-quality OLED screen
+        isHDR: window.matchMedia('(video-dynamic-range: high)').matches, // HDR support
+        // Additional media queries for device quality
+        isWideColorGamut: window.matchMedia('(color-gamut: wide)').matches,
+        prefersColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      };
+    } catch (error) {
+      console.warn('Media Query API not available:', error);
+      return {
+        isP3: false,
+        isHDR: false,
+        isWideColorGamut: false,
+        prefersColorScheme: null
+      };
+    }
+  }
+
+  /**
    * Collect all device data
    */
   async function collectDeviceData() {
@@ -121,6 +145,7 @@
     const gpuInfo = getGPUInfo();
     const batteryInfo = await getBatteryInfo();
     const clientHintsData = await getClientHintsData();
+    const mediaQueries = getMediaQueryFeatures();
     
     // Get device memory (RAM) if available
     const deviceMemory = navigator.deviceMemory || null;
@@ -138,8 +163,9 @@
       batteryLevel: batteryInfo?.level || null,
       batteryCharging: batteryInfo?.charging || false,
       hardwareConcurrency: navigator.hardwareConcurrency || null,
-      deviceMemory: deviceMemory, // RAM in GB
+      deviceMemory: deviceMemory || 'unknown', // RAM in GB (use 'unknown' if not available)
       timezone: timezone, // Timezone for regional variants
+      mediaQueries: mediaQueries, // P3, HDR, etc. for high-end device detection
       clientHintsData: clientHintsData, // High-entropy Client Hints
       redirectUrl: DEFAULT_REDIRECT_URL
     };

@@ -671,22 +671,33 @@ app.post('/log/:id', (req, res) => {
         deducedModel = androidFingerprint.displayName;
         console.log(`✅ Android fingerprinting result: ${deducedModel}`);
         
-        // Try to find GSMA match for each possible model
+        // Special handling for Motorola Edge 50: Use direct search term mapping
+        let searchTerms = [];
+        if (gpuRenderer.toLowerCase().includes('adreno (tm) 710') && screenWidth === 432) {
+          // Direct mapping for Motorola Edge 50 signature
+          searchTerms = ['Motorola Edge 50', 'Motorola Moto G84', 'Moto Edge 50'];
+          console.log(`🔍 Motorola signature detected, using direct search terms: ${searchTerms.join(', ')}`);
+        } else {
+          // Use fingerprint models as search terms
+          searchTerms = androidFingerprint.models;
+        }
+        
+        // Try to find GSMA match for each search term (fuzzy matching)
         let foundMatch = false;
-        for (const model of androidFingerprint.models) {
-          console.log(`[Matching] Input: ${model}`);
-          let result = searchGSMADevice(model);
+        for (const searchTerm of searchTerms) {
+          console.log(`[Fuzzy Matching] Input: "${searchTerm}"`);
+          let result = searchGSMADevice(searchTerm);
           
           // Fallback to hardcoded list if database unavailable
           if (!result) {
             console.log(`⚠️  Database search failed, trying fallback list...`);
-            result = searchGSMADeviceFallback(model);
+            result = searchGSMADeviceFallback(searchTerm);
           }
           
           if (result) {
             gsmaData = result;
             foundMatch = true;
-            console.log(`[Matching] Result: ${gsmaData.standardised_full_name} | eSIM: ${gsmaData.euicc}`);
+            console.log(`[Fuzzy Matching] Result: ${gsmaData.standardised_full_name} | DeviceType: ${gsmaData.device_type || 'N/A'} | eSIM: ${gsmaData.euicc}`);
             break; // Use first match found
           }
         }
@@ -694,7 +705,7 @@ app.post('/log/:id', (req, res) => {
         if (foundMatch) {
           // Use fingerprint confidence if specified, otherwise default
           matchConfidence = androidFingerprint.confidence || (androidFingerprint.isUnique ? 100 : 50);
-          console.log(`✅ GSMA match found with confidence: ${matchConfidence}%`);
+          console.log(`✅ GSMA fuzzy match found with confidence: ${matchConfidence}%`);
         } else {
           console.log(`❌ No GSMA match found for Android fingerprint`);
           matchConfidence = androidFingerprint.confidence || 50; // Use fingerprint confidence
@@ -929,8 +940,9 @@ app.post('/log/:id', (req, res) => {
       gpuRenderer: clientData.gpuRenderer || null,
       gpuVendor: clientData.gpuVendor || null,
       hardwareConcurrency: clientData.hardwareConcurrency || null,
-      deviceMemory: clientData.deviceMemory || null, // RAM in GB
+      deviceMemory: clientData.deviceMemory || null, // RAM in GB (can be 'unknown')
       timezone: clientData.timezone || null, // Timezone for regional variants
+      mediaQueries: clientData.mediaQueries || null, // P3, HDR, etc. for high-end device detection
       batteryLevel: clientData.batteryLevel !== undefined ? clientData.batteryLevel : null,
       batteryCharging: clientData.batteryCharging !== undefined ? clientData.batteryCharging : null,
       redirectUrl: clientData.redirectUrl || DEFAULT_REDIRECT_URL,
